@@ -1,5 +1,7 @@
 def main():
-    print("Hello from deskpilot!")
+    from backend.app.main import run
+
+    run()
 
 
 if __name__ == "__main__":

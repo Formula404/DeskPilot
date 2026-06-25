@@ -8,3 +8,41 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Runtime data
+data/
+*.log
+
+# Frontend dependencies/build outputs
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/src-tauri/target/
+browser-extension/dist/
+
+# Local environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Claude / agents
+.claude/
+.agents/
+
+# Test cache
+.pytest_cache/
+.tox/
+coverage/
+
+# Python type checking
+.mypy_cache/
+.ruff_cache/
