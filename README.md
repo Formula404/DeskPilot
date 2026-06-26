@@ -48,11 +48,70 @@ uv sync
 uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8765
 
 # 前端
-cd frontend && npm install && npm run dev
+cd frontend && npm install
+
+# 网页预览（只启动 Vite，可用浏览器打开 http://localhost:1420）
+npm run dev
+
+# Tauri 桌面窗口预览（开发时会拉起原生桌面壳）
+npm run tauri -- dev
 
 # 浏览器扩展
 # Chrome/Edge → 扩展管理 → 加载已解压的扩展 → 选择 browser-extension/
 ```
+
+### Tauri 开发环境依赖
+
+`npm run dev` 只需要 Node/npm，适合先看前端网页界面。
+
+`npm run tauri -- dev` 会编译并启动 Tauri 桌面壳，因此开发机还需要安装 Rust 工具链。若出现 `program not found`、`failed to run 'cargo metadata'`，说明系统找不到 `cargo`。
+
+Windows 安装：
+
+```powershell
+winget install Rustlang.Rustup
+```
+
+安装后重新打开终端，确认：
+
+```powershell
+cargo --version
+rustc --version
+```
+
+如果后续出现 MSVC/linker/C++ build tools 相关错误，再安装 Visual Studio Build Tools，并勾选 **Desktop development with C++**。至少需要包含：
+
+- MSVC v143 - VS 2022 C++ x64/x86 build tools
+- Windows 10/11 SDK
+- C++ CMake tools for Windows
+
+Build Tools 装好后，普通 PowerShell 里执行 `where.exe link` 仍可能找不到 `link.exe`，这是正常的。MSVC 链接器通常不会永久加入全局 `Path`，需要在 VS 开发者环境里启动 Tauri：
+
+```text
+开始菜单 → x64 Native Tools Command Prompt for VS 2022
+```
+
+然后运行：
+
+```cmd
+cd /d D:\Work\DeskPilot\frontend
+npm run tauri -- dev
+```
+
+也可以从普通 PowerShell 先打开已加载 MSVC 环境的新命令行：
+
+```powershell
+cmd /k "`"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat`" -arch=x64 && cd /d D:\Work\DeskPilot\frontend"
+```
+
+在新窗口中确认：
+
+```cmd
+where link
+npm run tauri -- dev
+```
+
+这些是开发和本地打包 Tauri 时需要的依赖；普通网页预览不需要，最终用户安装打包后的应用也不需要。
 
 ## 开发路线
 
