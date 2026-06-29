@@ -14,8 +14,17 @@ class ToolRegistry:
     def get(self, name: str) -> ToolDefinition:
         return self._tools[name]
 
+    def get_by_openai_name(self, openai_name: str) -> ToolDefinition:
+        for tool in self._tools.values():
+            if tool.openai_name == openai_name:
+                return tool
+        raise KeyError(openai_name)
+
     def list(self) -> list[ToolDefinition]:
         return list(self._tools.values())
+
+    def openai_tools(self, allowed_names: list[str]) -> list[dict]:
+        return [self.get(name).to_openai_tool() for name in allowed_names]
 
     async def call(self, name: str, payload: dict) -> ToolResult:
         tool = self.get(name)

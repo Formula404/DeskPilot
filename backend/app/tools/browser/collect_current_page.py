@@ -39,6 +39,22 @@ async def _handler(_: dict) -> ToolResult:
 collect_current_page = ToolDefinition(
     name="browser.collect_current_page",
     description="通过浏览器扩展通道实时采集当前网页上下文",
+    input_schema={
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "url": {"type": "string"},
+            "title": {"type": ["string", "null"]},
+            "visible_text": {"type": "string"},
+            "dom_summary": {"type": "array"},
+            "context_id": {"type": "string"},
+        },
+        "additionalProperties": True,
+    },
     risk_level="low",
     required_permissions=["browser_context:read"],
     handler=_handler,

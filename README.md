@@ -3,7 +3,7 @@
 Windows 个人桌面助手。自然语言下达任务 → Agent 感知桌面上下文 → 自动执行 → 结果反馈。
 
 ```text
-"总结当前网页并保存" → 悬浮窗发送 → LangGraph → 浏览器扩展通道采集当前页 → OpenAI → Markdown
+"总结当前网页并保存" → 悬浮窗发送 → LangGraph → OpenAI Tool Calling → 浏览器/文件工具 → Markdown
 ```
 
 ## 架构
@@ -16,8 +16,9 @@ FastAPI 本地服务 (127.0.0.1:8765)
        │
        ▼
 LangGraph 编排核心
+       ├── Tool Calling Agent（LLM 决策 / 工具调用 / observation）
        ├── 上下文感知（窗口识别 / 浏览器 / 截图 OCR）
-       ├── 工具路由（Playwright / UIA / RPA / 文件）
+       ├── 工具注册表（浏览器 / Playwright / UIA / RPA / 文件）
        ├── 安全层（权限 / 审批 / 审计）
        └── 记忆层（短期状态 / FTS5 长期记忆）
 ```
@@ -31,7 +32,7 @@ LangGraph 编排核心
 | 状态管理 | Zustand |
 | 后端 | Python 3.12 + FastAPI |
 | 包管理 | uv |
-| Agent | LangGraph |
+| Agent | LangGraph + OpenAI Tool Calling |
 | 模型 | OpenAI SDK |
 | 数据库 | SQLite + FTS5 |
 | 浏览器通道 | Chrome/Edge Manifest V3 扩展 + 本地 WebSocket/HTTP |
@@ -118,7 +119,7 @@ npm run tauri -- dev
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| 0 | 项目骨架 — 前后端工程、Agent 内核、Tool Registry | 进行中 |
+| 0 | 项目骨架 — 前后端工程、Tool Calling Agent、Tool Registry | 进行中 |
 | 1 | 悬浮窗 + 当前窗口识别 | 待开始 |
 | 2 | 网页操作闭环（总结、表格导出） | 待开始 |
 | 3 | 桌面应用 + 基础 RPA（网易云音乐） | 待开始 |
@@ -129,9 +130,10 @@ npm run tauri -- dev
 
 ```
 打开网页 → 唤起悬浮窗 → 输入"总结当前网页并保存"
-  → FastAPI 创建任务 → 后端通过浏览器扩展通道请求当前页上下文
-  → LangGraph 识别 web_page_summary → OpenAI 总结
-  → 写入 Markdown → SSE 推送完成
+  → FastAPI 创建任务 → LangGraph 进入受限 tool calling loop
+  → LLM 调用 browser.collect_current_page 获取当前页上下文
+  → LLM 生成总结并调用 file.write_markdown
+  → SSE 推送完成
 ```
 
 ## 目录

@@ -43,7 +43,7 @@ browser-extension/
   → background 转发给目标 tab 的 content script
   → content script 执行采集或动作
   → 扩展通过同一通道回传 result / error
-  → 后端写入 browser_contexts、task_steps 或继续 Agent workflow
+  → 后端写入 browser_contexts、task_steps，并把 observation 返回给 tool calling Agent
 
 HTTP `POST /context/browser/current-page` 只作为开发期兼容接口或离线兜底，不作为产品主交互链路。
 ```

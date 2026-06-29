@@ -4,9 +4,9 @@ from openai import AsyncOpenAI
 
 from backend.app.agent.intents import detect_intent
 from backend.app.agent.state import AgentState
+from backend.app.agent.tool_calling import ToolCallingError, run_web_page_summary_tool_agent
 from backend.app.core.config import get_settings
 from backend.app.db.repository import add_task_step, update_task
-from backend.app.tools.registry import tool_registry
 
 
 async def route_intent(state: AgentState) -> AgentState:
@@ -25,32 +25,15 @@ async def route_intent(state: AgentState) -> AgentState:
 
 
 async def summarize_current_page(state: AgentState) -> AgentState:
-    browser_result = await tool_registry.call("browser.collect_current_page", {})
-    if not browser_result.ok:
-        return {**state, "error": browser_result.message}
+    try:
+        result = await run_web_page_summary_tool_agent(
+            task_id=state["task_id"],
+            user_input=state["user_input"],
+        )
+    except ToolCallingError as exc:
+        return {**state, "error": str(exc)}
 
-    summary_result = await tool_registry.call(
-        "browser.summarize_current_page",
-        {"page": browser_result.data, "instruction": state["user_input"]},
-    )
-    if not summary_result.ok:
-        return {**state, "error": summary_result.message}
-
-    write_result = await tool_registry.call(
-        "file.write_markdown",
-        {
-            "title": browser_result.data.get("title") or "网页总结",
-            "content": summary_result.data["summary"],
-        },
-    )
-    if not write_result.ok:
-        return {**state, "error": write_result.message}
-
-    return {
-        **state,
-        "final_response": summary_result.data["summary"],
-        "artifacts": [artifact.model_dump() for artifact in write_result.artifacts],
-    }
+    return {**state, **result}
 
 
 async def general_chat(state: AgentState) -> AgentState:

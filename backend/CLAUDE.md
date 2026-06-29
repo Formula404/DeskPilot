@@ -7,7 +7,7 @@ Python 3.12 + FastAPI + LangGraph + SQLite，监听 `127.0.0.1:8765`。
 | 目录 | 职责 | 边界 |
 |---|---|---|
 | `app/api/` | HTTP/SSE/WebSocket 路由（/chat, /tasks, /events, /context, /browser, /tools, /approvals） | 只做参数校验、连接管理和响应，不写业务逻辑 |
-| `app/agent/` | LangGraph 图、节点、状态定义、意图路由 | 不直接操作 UI 或文件系统 |
+| `app/agent/` | LangGraph 图、节点、状态定义、意图路由、tool calling loop | 不直接操作 UI 或文件系统 |
 | `app/context/` | 当前窗口、浏览器上下文、截图采集 | 不依赖 agent 模块 |
 | `app/core/` | 配置加载、日志初始化、路径常量 | 不依赖其他 app 模块 |
 | `app/db/` | SQLite 连接管理、表创建、迁移 | 不依赖业务模块 |
@@ -57,7 +57,7 @@ from fastapi import FastAPI
 
 - API 测试：pytest + FastAPI TestClient
 - 工具 handler：单元测试
-- Agent workflow：happy path 测试
+- Agent tool calling loop：happy path 测试，至少覆盖一次工具调用和 observation 写入
 
 ## 详见
 

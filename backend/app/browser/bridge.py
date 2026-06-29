@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 
 from backend.app.db.repository import new_id
 
@@ -69,14 +69,15 @@ class BrowserBridge:
         payload: dict[str, Any] | None = None,
         timeout: float = 8.0,
     ) -> dict[str, Any]:
-        websocket = self._websocket
-        if websocket is None:
-            raise BrowserBridgeError("浏览器扩展未连接，请先安装并启用 DeskPilot 浏览器扩展。")
-
         request_id = new_id()
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
-        self._pending[request_id] = future
+        async with self._lock:
+            websocket = self._websocket
+            if websocket is None:
+                raise BrowserBridgeError("浏览器扩展未连接，请先安装并启用 DeskPilot 浏览器扩展。")
+            self._pending[request_id] = future
+
         try:
             await websocket.send_json(
                 {
@@ -90,7 +91,17 @@ class BrowserBridge:
             return await asyncio.wait_for(future, timeout=timeout)
         except TimeoutError as exc:
             raise BrowserBridgeError(f"浏览器扩展执行 {command} 超时。") from exc
+        except BrowserBridgeError:
+            raise
+        except WebSocketDisconnect as exc:
+            raise BrowserBridgeError("浏览器扩展连接已断开，请稍后重试。") from exc
+        except RuntimeError as exc:
+            raise BrowserBridgeError(f"浏览器扩展连接不可用：{exc}") from exc
+        except Exception as exc:
+            raise BrowserBridgeError(f"浏览器扩展通信失败：{exc}") from exc
         finally:
+            if future.done() and not future.cancelled():
+                future.exception()
             self._pending.pop(request_id, None)
 
     async def collect_page(self, timeout: float = 8.0) -> dict[str, Any]:

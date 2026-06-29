@@ -1,20 +1,21 @@
 # agent — LangGraph 编排核心
 
-采用"意图识别 + Workflow 主干 + 受限 ReAct 子循环"的混合模式。
+采用"意图识别 + LangGraph 状态机 + 受限 OpenAI Tool Calling 循环"的 Agent 模式。
 
 ## 架构原则
 
-- 已知高频任务走固定 workflow（可靠、可预测）
-- 未知/半开放任务走受限 ReAct（灵活但有边界）
-- Workflow 内部可嵌 ReAct 子循环（用于定位、重试等不确定步骤）
-- ReAct 子循环最大步数固定为 **5 步**
+- 已知高频任务先进入对应任务边界，例如网页、文件、桌面应用，但任务内部由 LLM 通过 tool calling 决定下一步工具。
+- Tool calling 必须是受限白名单：每个 intent 只暴露相关低风险或已授权工具。
+- LangGraph 负责状态、步数、权限、安全节点、失败兜底和最终收束，不把业务步骤全部写死。
+- Tool calling 循环最大步数第一版固定为 **5 步**。
+- 固定 workflow 只作为兜底和强约束任务使用，不能作为普通任务的唯一执行方式。
 
 ## 图结构
 
 ```
-收集上下文 → 意图识别 → workflow 路由 → 选择执行策略
-  → 风险评估 → 需要确认? → 等待用户确认 → 执行工具
-  → 观察结果 → 是否完成? → 完成总结 / 重新规划
+收集上下文 → 意图识别 → 选择允许的工具集合
+  → Tool Calling 循环（LLM 决策 → 工具调用 → observation）
+  → 风险评估 / 审批 → 是否完成? → 最终回答 / 失败兜底
 ```
 
 ## 状态定义 (AgentState)
@@ -23,7 +24,7 @@
 user_input: str           # 用户原始指令
 desktop_context: dict     # 当前窗口、应用、URL、截图信息
 intent: str               # 识别后的任务意图
-plan: list                # 步骤计划
+plan: list                # LLM 生成或更新的计划
 tool_calls: list          # 已调用和待调用工具
 observations: list        # 工具返回结果
 risk_level: str           # low / medium / high
@@ -57,13 +58,26 @@ final_response: str       # 最终反馈
 ## 约束
 
 - 任务必须先经过意图路由，不允许跳过
+- LLM 只允许调用当前任务白名单里的工具
 - 每次工具调用前必须经过权限检查（调用 safety 模块）
 - 每次工具调用后必须产生 observation
+- 每次 tool call 和 observation 必须写入 task_steps，便于审计和面试展示
 - 敏感任务必须进入 approval 节点
 - **禁止** Agent 直接执行任意 Python、PowerShell、cmd 或 shell 字符串
 - **禁止** 让 LLM 直接拼接系统命令
 - **禁止** 绕过 safety 层直接调用工具
 - 网页任务必须通过结构化浏览器工具调用扩展通道或 Playwright，禁止让 LLM 直接生成任意页面脚本执行
+
+## 第一阶段 Tool Calling 范围
+
+`web_page_summary` 不再写死为 `collect -> summarize -> write`。
+
+第一阶段应让 LLM 在受限工具集合中自主完成：
+
+- `browser.collect_current_page`
+- `file.write_markdown`
+
+LLM 负责根据用户指令决定先采集网页、再生成总结内容、最后保存 Markdown。`browser.summarize_current_page` 只作为兼容/兜底工具，不作为主路径。
 
 ## 文件规范
 
@@ -71,6 +85,7 @@ final_response: str       # 最终反馈
 - `graph.py` — LangGraph 图构建
 - `nodes.py` — 各节点实现
 - `intents.py` — 意图路由逻辑
+- `tool_calling.py` — OpenAI tool calling 循环、工具 schema 映射、observation 处理
 - `prompts.py` — LLM 提示词（如有需要）
 
 ## 依赖

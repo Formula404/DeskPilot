@@ -66,6 +66,21 @@ def _fallback_summary(page: dict, instruction: str) -> str:
 summarize_current_page = ToolDefinition(
     name="browser.summarize_current_page",
     description="总结当前网页可见文本",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "page": {
+                "type": "object",
+                "description": "网页上下文数据",
+            },
+            "instruction": {
+                "type": "string",
+                "description": "用户的总结要求",
+            },
+        },
+        "required": ["page"],
+        "additionalProperties": False,
+    },
     risk_level="low",
     required_permissions=["browser_context:read", "openai:call"],
     handler=_handler,

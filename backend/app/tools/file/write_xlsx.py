@@ -30,6 +30,21 @@ async def _handler(payload: dict) -> ToolResult:
 write_xlsx = ToolDefinition(
     name="file.write_xlsx",
     description="写入 Excel 文件到 data/exports",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "filename": {"type": "string"},
+            "rows": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {},
+                },
+            },
+        },
+        "required": ["rows"],
+        "additionalProperties": False,
+    },
     risk_level="low",
     required_permissions=["file:create"],
     handler=_handler,

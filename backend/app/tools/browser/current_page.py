@@ -19,6 +19,11 @@ async def _handler(_: dict) -> ToolResult:
 get_current_page = ToolDefinition(
     name="browser.get_current_page",
     description="获取浏览器扩展最近上报的当前网页上下文",
+    input_schema={
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
     risk_level="low",
     required_permissions=["browser_context:read"],
     handler=_handler,

@@ -13,8 +13,10 @@ def list_tools() -> dict:
         "tools": [
             {
                 "name": tool.name,
+                "openai_name": tool.openai_name,
                 "risk_level": tool.risk_level,
                 "description": tool.description,
+                "input_schema": tool.input_schema,
             }
             for tool in tool_registry.list()
         ]

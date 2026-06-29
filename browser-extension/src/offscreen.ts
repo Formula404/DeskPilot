@@ -55,7 +55,8 @@ function stopHeartbeat() {
   heartbeatTimer = undefined;
 }
 
-function scheduleReconnect() {
+function scheduleReconnect(closedSocket: WebSocket) {
+  if (socket !== closedSocket) return;
   stopHeartbeat();
   if (reconnectTimer !== undefined) return;
   reconnectTimer = self.setTimeout(() => {
@@ -72,8 +73,10 @@ function connect() {
     return;
   }
 
-  socket = new WebSocket(WS_URL);
-  socket.addEventListener("open", () => {
+  const nextSocket = new WebSocket(WS_URL);
+  socket = nextSocket;
+  nextSocket.addEventListener("open", () => {
+    if (socket !== nextSocket) return;
     if (reconnectTimer !== undefined) {
       self.clearTimeout(reconnectTimer);
       reconnectTimer = undefined;
@@ -81,11 +84,12 @@ function connect() {
     registerBrowser();
     startHeartbeat();
   });
-  socket.addEventListener("message", (event) => {
+  nextSocket.addEventListener("message", (event) => {
+    if (socket !== nextSocket) return;
     void handleBackendMessage(event.data);
   });
-  socket.addEventListener("close", scheduleReconnect);
-  socket.addEventListener("error", scheduleReconnect);
+  nextSocket.addEventListener("close", () => scheduleReconnect(nextSocket));
+  nextSocket.addEventListener("error", () => scheduleReconnect(nextSocket));
 }
 
 async function executeCommand(command: BrowserCommand): Promise<BrowserResult> {
@@ -111,7 +115,12 @@ async function executeCommand(command: BrowserCommand): Promise<BrowserResult> {
 }
 
 async function handleBackendMessage(raw: string) {
-  const message = JSON.parse(raw) as Partial<BrowserCommand>;
+  let message: Partial<BrowserCommand>;
+  try {
+    message = JSON.parse(raw) as Partial<BrowserCommand>;
+  } catch {
+    return;
+  }
   if (message.type !== "browser.command" || !message.request_id || !message.command) {
     return;
   }

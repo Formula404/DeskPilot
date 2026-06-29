@@ -1,6 +1,6 @@
 # DeskPilot
 
-个人桌面助手：Tauri 悬浮窗 → 自然语言任务 → LangGraph Agent → 工具执行 → 结果反馈。
+个人桌面助手：Tauri 悬浮窗 → 自然语言任务 → LangGraph Agent → OpenAI Tool Calling → 工具执行 → 结果反馈。
 
 ## 技术栈
 
@@ -11,7 +11,7 @@
 | 前端样式 | Tailwind CSS + shadcn/ui |
 | 本地服务 | Python 3.12 + FastAPI |
 | 包管理 | uv |
-| Agent 编排 | LangGraph |
+| Agent 编排 | LangGraph + OpenAI Tool Calling |
 | 模型接入 | OpenAI SDK |
 | 数据库 | SQLite |
 | 长期记忆检索 | SQLite FTS5 |
@@ -35,8 +35,9 @@ FastAPI 本地服务 (127.0.0.1:8765)
        ▼
 LangGraph 编排核心
        │
+       ├── Tool Calling Agent（LLM 决策 / 工具调用 / observation）
        ├── 上下文感知层（窗口识别 / 截图 OCR / 浏览器上下文）
-       ├── 工具注册与路由（CLI / API / Playwright / RPA）
+       ├── 工具注册表（CLI / API / 浏览器扩展 / Playwright / RPA）
        ├── 执行安全层（权限 / 审批 / 审计日志）
        └── 记忆层（短期 state / 任务历史 / FTS5 长期记忆）
 ```
@@ -97,13 +98,14 @@ tools → db
 
 ## 第一阶段目标（当前）
 
-打通网页总结闭环，并为后续网页自动操作预留同一条浏览器通信通道：
+打通网页总结闭环，并让第一个功能点就采用受限 tool calling Agent：
 
 ```
 打开网页 → 唤起悬浮窗 → 输入"总结当前网页并保存"
-  → FastAPI 创建任务 → 后端通过浏览器扩展通道请求当前页上下文
-  → LangGraph 识别 web_page_summary → OpenAI 总结
-  → 写入 Markdown → SSE 推送完成
+  → FastAPI 创建任务 → LangGraph 进入 tool calling loop
+  → LLM 调用 browser.collect_current_page
+  → LLM 总结并调用 file.write_markdown
+  → SSE 推送完成
 ```
 
 第一阶段不做：微信 RPA、网易云音乐、OCR、pyautogui、向量检索、插件市场。

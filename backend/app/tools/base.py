@@ -17,6 +17,30 @@ class ToolDefinition(BaseModel):
 
     name: str
     description: str
+    input_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
+    output_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": True,
+    }
     risk_level: str
     required_permissions: list[str]
     handler: ToolHandler
+
+    @property
+    def openai_name(self) -> str:
+        return self.name.replace(".", "_")
+
+    def to_openai_tool(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.openai_name,
+                "description": self.description,
+                "parameters": self.input_schema,
+            },
+        }
