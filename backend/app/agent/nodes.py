@@ -25,7 +25,7 @@ async def route_intent(state: AgentState) -> AgentState:
 
 
 async def summarize_current_page(state: AgentState) -> AgentState:
-    browser_result = await tool_registry.call("browser.get_current_page", {})
+    browser_result = await tool_registry.call("browser.collect_current_page", {})
     if not browser_result.ok:
         return {**state, "error": browser_result.message}
 

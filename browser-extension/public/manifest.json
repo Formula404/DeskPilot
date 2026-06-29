@@ -3,8 +3,11 @@
   "name": "DeskPilot Browser Context",
   "version": "0.1.0",
   "description": "Provides current page context to DeskPilot.",
-  "permissions": ["activeTab", "scripting"],
-  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "permissions": ["activeTab", "scripting", "tabs", "offscreen"],
+  "host_permissions": ["http://127.0.0.1:8765/*", "<all_urls>"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:8765 ws://127.0.0.1:8765"
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"

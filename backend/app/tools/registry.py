@@ -26,12 +26,14 @@ tool_registry = ToolRegistry()
 
 
 def register_default_tools() -> None:
+    from backend.app.tools.browser.collect_current_page import collect_current_page
     from backend.app.tools.browser.current_page import get_current_page
     from backend.app.tools.browser.summarize import summarize_current_page
     from backend.app.tools.file.write_markdown import write_markdown
     from backend.app.tools.file.write_xlsx import write_xlsx
 
     for tool in [
+        collect_current_page,
         get_current_page,
         summarize_current_page,
         write_markdown,

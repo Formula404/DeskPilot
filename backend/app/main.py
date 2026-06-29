@@ -4,6 +4,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.app.api.routes_browser import router as browser_router
 from backend.app.api.routes_chat import router as chat_router
 from backend.app.api.routes_context import router as context_router
 from backend.app.api.routes_events import router as events_router
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(chat_router)
+    app.include_router(browser_router)
     app.include_router(context_router)
     app.include_router(events_router)
     app.include_router(settings_router)
