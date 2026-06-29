@@ -6,7 +6,7 @@ Python 3.12 + FastAPI + LangGraph + SQLite，监听 `127.0.0.1:8765`。
 
 | 目录 | 职责 | 边界 |
 |---|---|---|
-| `app/api/` | HTTP 路由（/chat, /tasks, /events, /context, /tools, /approvals） | 只做参数校验和响应，不写业务逻辑 |
+| `app/api/` | HTTP/SSE/WebSocket 路由（/chat, /tasks, /events, /context, /browser, /tools, /approvals） | 只做参数校验、连接管理和响应，不写业务逻辑 |
 | `app/agent/` | LangGraph 图、节点、状态定义、意图路由 | 不直接操作 UI 或文件系统 |
 | `app/context/` | 当前窗口、浏览器上下文、截图采集 | 不依赖 agent 模块 |
 | `app/core/` | 配置加载、日志初始化、路径常量 | 不依赖其他 app 模块 |
@@ -32,7 +32,7 @@ tools → db
 
 ## API 约定
 
-- 协议：HTTP + SSE
+- 协议：HTTP + SSE + WebSocket。Tauri 使用 HTTP/SSE；浏览器扩展使用 WebSocket 作为后端主动下发采集/动作指令的主通道，HTTP 作为兼容/兜底。
 - 数据格式：JSON
 - 时间格式：ISO 8601
 - ID 格式：UUID

@@ -27,6 +27,8 @@ domain.action
 示例：
 - `browser.get_current_page`
 - `browser.summarize_current_page`
+- `browser.collect_current_page`
+- `browser.execute_page_action`
 - `browser.export_table_to_xlsx`
 - `desktop.get_foreground_window`
 - `desktop.open_app`
@@ -89,10 +91,18 @@ tools/
 ## 第一批必须实现的工具
 
 - `desktop.get_foreground_window`
-- `browser.get_current_page`
+- `browser.collect_current_page`（通过浏览器扩展通道主动采集当前页）
+- `browser.get_current_page`（读取最近一次浏览器上下文，作为兼容/缓存）
 - `browser.summarize_current_page`
 - `file.write_markdown`
 - `file.write_xlsx`
+
+## 浏览器工具约束
+
+- 当前用户浏览器页面的采集和轻量动作优先走浏览器扩展通道。
+- Playwright 用于独立受控浏览器任务、自动化测试和扩展无法覆盖的场景。
+- 浏览器动作必须是结构化白名单动作，例如 `collect_page`、`click`、`type`、`scroll`、`extract_table`。
+- 禁止让 LLM 直接下发任意 JavaScript 到页面执行。
 
 ## 依赖
 

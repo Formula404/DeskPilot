@@ -27,10 +27,13 @@ async def _handler(payload: dict) -> ToolResult:
             message="未配置 OPENAI_API_KEY，已生成本地占位总结。",
         )
 
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
-    response = await client.responses.create(
+    client = AsyncOpenAI(
+        api_key=settings.openai_api_key,
+        base_url=settings.openai_base_url or "https://api.openai.com/v1",
+    )
+    response = await client.chat.completions.create(
         model=settings.openai_model,
-        input=[
+        messages=[
             {
                 "role": "system",
                 "content": "你是 DeskPilot 的网页总结工具。请用中文简洁总结用户当前网页。",
@@ -43,7 +46,7 @@ async def _handler(payload: dict) -> ToolResult:
     )
     return ToolResult(
         ok=True,
-        data={"summary": response.output_text},
+        data={"summary": response.choices[0].message.content},
         message="网页总结完成",
     )
 

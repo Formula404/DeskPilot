@@ -2,8 +2,8 @@
 
 Windows 个人桌面助手。自然语言下达任务 → Agent 感知桌面上下文 → 自动执行 → 结果反馈。
 
-```
-"总结当前网页并保存" → 悬浮窗 → LangGraph → 浏览器扩展 → OpenAI → Markdown
+```text
+"总结当前网页并保存" → 悬浮窗发送 → LangGraph → 浏览器扩展通道采集当前页 → OpenAI → Markdown
 ```
 
 ## 架构
@@ -34,8 +34,8 @@ LangGraph 编排核心
 | Agent | LangGraph |
 | 模型 | OpenAI SDK |
 | 数据库 | SQLite + FTS5 |
-| 浏览器上下文 | Chrome/Edge Manifest V3 扩展 |
-| 浏览器自动化 | Playwright |
+| 浏览器通道 | Chrome/Edge Manifest V3 扩展 + 本地 WebSocket/HTTP |
+| 浏览器自动化 | 扩展执行当前页轻量动作 + Playwright 受控浏览器 |
 | Windows 自动化 | pywin32 + pywinauto |
 | RPA 视觉 | mss + opencv-python + PaddleOCR |
 | 实时事件 | SSE |
@@ -57,7 +57,8 @@ npm run dev
 npm run tauri -- dev
 
 # 浏览器扩展
-# Chrome/Edge → 扩展管理 → 加载已解压的扩展 → 选择 browser-extension/
+cd browser-extension && npm install && npm run build
+# Chrome/Edge → 扩展管理 → 加载已解压的扩展 → 选择 browser-extension/dist
 ```
 
 ### Tauri 开发环境依赖
@@ -128,7 +129,7 @@ npm run tauri -- dev
 
 ```
 打开网页 → 唤起悬浮窗 → 输入"总结当前网页并保存"
-  → 浏览器扩展上报上下文 → FastAPI 创建任务
+  → FastAPI 创建任务 → 后端通过浏览器扩展通道请求当前页上下文
   → LangGraph 识别 web_page_summary → OpenAI 总结
   → 写入 Markdown → SSE 推送完成
 ```
@@ -139,7 +140,7 @@ npm run tauri -- dev
 DeskPilot/
   backend/               FastAPI + LangGraph + OpenAI
   frontend/              Tauri + React 悬浮窗
-  browser-extension/     Manifest V3 浏览器扩展
+  browser-extension/     Manifest V3 浏览器扩展（浏览器上下文与动作执行通道）
   data/                  本地数据（不入 git）
   report/                设计文档
 ```

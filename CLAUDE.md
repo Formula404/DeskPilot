@@ -15,8 +15,8 @@
 | 模型接入 | OpenAI SDK |
 | 数据库 | SQLite |
 | 长期记忆检索 | SQLite FTS5 |
-| 浏览器扩展 | Chrome/Edge Manifest V3 |
-| 浏览器自动化 | Playwright |
+| 浏览器通道 | Chrome/Edge Manifest V3 + 本地 WebSocket/HTTP |
+| 浏览器自动化 | 扩展执行当前页轻量动作 + Playwright |
 | Windows 自动化 | pywin32 + pywinauto |
 | RPA 视觉 | mss + opencv-python + PaddleOCR |
 | 鼠标键盘 | pyautogui |
@@ -47,7 +47,7 @@ LangGraph 编排核心
 DeskPilot/
   backend/                  # Python FastAPI 本地服务
     app/
-      api/                  # HTTP 路由
+      api/                  # HTTP/SSE/WebSocket 路由
       agent/                # LangGraph 图、节点、状态、意图路由
       context/              # 窗口/浏览器/截图上下文采集
       core/                 # 配置、日志、路径
@@ -66,7 +66,7 @@ DeskPilot/
       store/                # Zustand stores
       styles/               # 样式
       types/                # TypeScript 类型
-  browser-extension/        # Manifest V3 浏览器扩展
+  browser-extension/        # Manifest V3 浏览器扩展，浏览器上下文与动作执行通道
     src/
     public/
   data/                     # 本地数据目录（不上传 git）
@@ -97,11 +97,11 @@ tools → db
 
 ## 第一阶段目标（当前）
 
-打通网页总结闭环：
+打通网页总结闭环，并为后续网页自动操作预留同一条浏览器通信通道：
 
 ```
 打开网页 → 唤起悬浮窗 → 输入"总结当前网页并保存"
-  → 浏览器扩展上报上下文 → FastAPI 创建任务
+  → FastAPI 创建任务 → 后端通过浏览器扩展通道请求当前页上下文
   → LangGraph 识别 web_page_summary → OpenAI 总结
   → 写入 Markdown → SSE 推送完成
 ```
@@ -123,7 +123,11 @@ npm install
 npm run dev
 npm run build
 
-# 浏览器扩展：在 Chrome/Edge 中加载 browser-extension/ 目录
+# 浏览器扩展
+cd browser-extension
+npm install
+npm run build
+# 在 Chrome/Edge 中加载 browser-extension/dist 目录
 ```
 
 ## 提交前检查

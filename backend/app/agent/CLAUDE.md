@@ -49,9 +49,10 @@ final_response: str       # 最终反馈
 
 1. 官方 API / 本地 API
 2. CLI / URI Scheme / 快捷命令
-3. Playwright 浏览器 DOM 自动化
-4. Windows UI Automation (UIA)
-5. 图像识别 / OCR / 坐标点击（RPA 兜底）
+3. 浏览器扩展通道操作用户当前页（collect/click/type/extract）
+4. Playwright 受控浏览器自动化（独立浏览器任务和测试）
+5. Windows UI Automation (UIA)
+6. 图像识别 / OCR / 坐标点击（RPA 兜底）
 
 ## 约束
 
@@ -62,6 +63,7 @@ final_response: str       # 最终反馈
 - **禁止** Agent 直接执行任意 Python、PowerShell、cmd 或 shell 字符串
 - **禁止** 让 LLM 直接拼接系统命令
 - **禁止** 绕过 safety 层直接调用工具
+- 网页任务必须通过结构化浏览器工具调用扩展通道或 Playwright，禁止让 LLM 直接生成任意页面脚本执行
 
 ## 文件规范
 

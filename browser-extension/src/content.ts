@@ -26,3 +26,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   });
   return true;
 });
+
+function notifyPageVisible() {
+  if (document.visibilityState !== "visible") return;
+  chrome.runtime.sendMessage({ type: "DESKPILOT_PAGE_VISIBLE" });
+}
+
+window.addEventListener("focus", notifyPageVisible);
+document.addEventListener("visibilitychange", notifyPageVisible);

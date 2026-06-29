@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from openai import AsyncOpenAI
+
 from backend.app.agent.intents import detect_intent
 from backend.app.agent.state import AgentState
+from backend.app.core.config import get_settings
 from backend.app.db.repository import add_task_step, update_task
 from backend.app.tools.registry import tool_registry
 
@@ -51,9 +54,34 @@ async def summarize_current_page(state: AgentState) -> AgentState:
 
 
 async def general_chat(state: AgentState) -> AgentState:
+    settings = get_settings()
+    if not settings.openai_api_key:
+        return {
+            **state,
+            "final_response": "未配置 API Key，无法进行对话。请在 .env 中设置 OPENAI_API_KEY。",
+        }
+
+    client = AsyncOpenAI(
+        api_key=settings.openai_api_key,
+        base_url=settings.openai_base_url or "https://api.openai.com/v1",
+    )
+    response = await client.chat.completions.create(
+        model=settings.openai_model,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "你是 DeskPilot，一个个人桌面助手。"
+                    "请用中文简洁、友好地回答用户的问题。"
+                    "如果用户的问题不明确，可以追问。"
+                ),
+            },
+            {"role": "user", "content": state["user_input"]},
+        ],
+    )
     return {
         **state,
-        "final_response": "当前骨架已接收任务。第一阶段主要支持当前网页总结并保存。",
+        "final_response": response.choices[0].message.content or "",
     }
 
 
