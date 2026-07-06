@@ -37,6 +37,8 @@ tool_registry = ToolRegistry()
 def register_default_tools() -> None:
     from backend.app.tools.browser.collect_current_page import collect_current_page
     from backend.app.tools.browser.current_page import get_current_page
+    from backend.app.tools.browser.export_structured_blocks_to_xlsx import export_structured_blocks_to_xlsx
+    from backend.app.tools.browser.export_table_to_xlsx import export_table_to_xlsx
     from backend.app.tools.browser.summarize import summarize_current_page
     from backend.app.tools.file.write_markdown import write_markdown
     from backend.app.tools.file.write_xlsx import write_xlsx
@@ -44,6 +46,8 @@ def register_default_tools() -> None:
     for tool in [
         collect_current_page,
         get_current_page,
+        export_structured_blocks_to_xlsx,
+        export_table_to_xlsx,
         summarize_current_page,
         write_markdown,
         write_xlsx,

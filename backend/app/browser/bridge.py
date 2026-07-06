@@ -123,5 +123,44 @@ class BrowserBridge:
             raise BrowserBridgeError("浏览器扩展返回了无效的当前页数据。")
         return data
 
+    async def extract_tables(self, timeout: float = 8.0) -> dict[str, Any]:
+        result = await self.command(
+            "extract_table",
+            payload={
+                "max_tables": 10,
+                "max_rows_per_table": 500,
+                "max_cell_chars": 300,
+            },
+            timeout=timeout,
+        )
+        if not result.get("ok"):
+            error = result.get("error") or {}
+            message = error.get("message") or "浏览器扩展抽取当前页表格失败。"
+            raise BrowserBridgeError(message)
+        data = result.get("data")
+        if not isinstance(data, dict):
+            raise BrowserBridgeError("浏览器扩展返回了无效的表格数据。")
+        return data
+
+    async def extract_structured_blocks(self, timeout: float = 8.0) -> dict[str, Any]:
+        result = await self.command(
+            "extract_structured_blocks",
+            payload={
+                "max_blocks": 20,
+                "max_items_per_block": 200,
+                "max_text_chars": 1000,
+                "max_meta_items": 8,
+            },
+            timeout=timeout,
+        )
+        if not result.get("ok"):
+            error = result.get("error") or {}
+            message = error.get("message") or "浏览器扩展抽取列表/卡片失败。"
+            raise BrowserBridgeError(message)
+        data = result.get("data")
+        if not isinstance(data, dict):
+            raise BrowserBridgeError("浏览器扩展返回了无效的列表/卡片数据。")
+        return data
+
 
 browser_bridge = BrowserBridge()

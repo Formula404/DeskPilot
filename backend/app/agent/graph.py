@@ -5,7 +5,13 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from backend.app.agent.nodes import finalize, general_chat, route_intent, summarize_current_page
+from backend.app.agent.nodes import (
+    export_current_page_table,
+    finalize,
+    general_chat,
+    route_intent,
+    summarize_current_page,
+)
 from backend.app.agent.state import AgentState
 from backend.app.api.events import EventBus
 from backend.app.db.repository import update_task
@@ -16,6 +22,8 @@ logger = logging.getLogger(__name__)
 def _route_after_intent(state: AgentState) -> str:
     if state.get("intent") == "web_page_summary":
         return "summarize_current_page"
+    if state.get("intent") == "web_table_export":
+        return "export_current_page_table"
     return "general_chat"
 
 
@@ -23,6 +31,7 @@ def build_graph():
     graph = StateGraph(AgentState)
     graph.add_node("route_intent", route_intent)
     graph.add_node("summarize_current_page", summarize_current_page)
+    graph.add_node("export_current_page_table", export_current_page_table)
     graph.add_node("general_chat", general_chat)
     graph.add_node("finalize", finalize)
     graph.set_entry_point("route_intent")
@@ -31,10 +40,12 @@ def build_graph():
         _route_after_intent,
         {
             "summarize_current_page": "summarize_current_page",
+            "export_current_page_table": "export_current_page_table",
             "general_chat": "general_chat",
         },
     )
     graph.add_edge("summarize_current_page", "finalize")
+    graph.add_edge("export_current_page_table", "finalize")
     graph.add_edge("general_chat", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile()

@@ -90,6 +90,50 @@ async function sendCollectPageMessage(tabId: number, payload: Record<string, unk
   }
 }
 
+async function sendExtractTableMessage(tabId: number, payload: Record<string, unknown>) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, {
+      type: "DESKPILOT_EXTRACT_TABLE",
+      payload,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("Receiving end does not exist")) {
+      throw error;
+    }
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"],
+    });
+    return await chrome.tabs.sendMessage(tabId, {
+      type: "DESKPILOT_EXTRACT_TABLE",
+      payload,
+    });
+  }
+}
+
+async function sendExtractStructuredBlocksMessage(tabId: number, payload: Record<string, unknown>) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, {
+      type: "DESKPILOT_EXTRACT_STRUCTURED_BLOCKS",
+      payload,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("Receiving end does not exist")) {
+      throw error;
+    }
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"],
+    });
+    return await chrome.tabs.sendMessage(tabId, {
+      type: "DESKPILOT_EXTRACT_STRUCTURED_BLOCKS",
+      payload,
+    });
+  }
+}
+
 async function collectPage(command: BrowserCommand) {
   const tab = await getTargetTab(command);
   if (!tab.id || !tab.url?.startsWith("http")) {
@@ -102,9 +146,33 @@ async function collectPage(command: BrowserCommand) {
   };
 }
 
+async function extractTable(command: BrowserCommand) {
+  const tab = await getTargetTab(command);
+  if (!tab.id || !tab.url?.startsWith("http")) {
+    throw new Error("当前标签页不是可读取的普通网页，请切换到 http/https 页面后重试。");
+  }
+  const tables = await sendExtractTableMessage(tab.id, command.payload ?? {});
+  return {
+    tab_id: tab.id,
+    ...tables,
+  };
+}
+
+async function extractStructuredBlocks(command: BrowserCommand) {
+  const tab = await getTargetTab(command);
+  if (!tab.id || !tab.url?.startsWith("http")) {
+    throw new Error("当前标签页不是可读取的普通网页，请切换到 http/https 页面后重试。");
+  }
+  const blocks = await sendExtractStructuredBlocksMessage(tab.id, command.payload ?? {});
+  return {
+    tab_id: tab.id,
+    ...blocks,
+  };
+}
+
 async function handleCommand(command: BrowserCommand): Promise<BrowserResult> {
   try {
-    if (command.command !== "collect_page") {
+    if (!["collect_page", "extract_table", "extract_structured_blocks"].includes(command.command)) {
       return {
         type: "browser.result",
         request_id: command.request_id,
@@ -118,7 +186,14 @@ async function handleCommand(command: BrowserCommand): Promise<BrowserResult> {
       };
     }
 
-    const data = await collectPage(command);
+    let data: unknown;
+    if (command.command === "collect_page") {
+      data = await collectPage(command);
+    } else if (command.command === "extract_table") {
+      data = await extractTable(command);
+    } else {
+      data = await extractStructuredBlocks(command);
+    }
     return {
       type: "browser.result",
       request_id: command.request_id,

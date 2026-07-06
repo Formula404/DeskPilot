@@ -46,7 +46,7 @@ LangGraph 编排核心
 ```bash
 # 后端
 uv sync
-uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8765
+uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8765 --timeout-graceful-shutdown 3 
 
 # 前端
 cd frontend && npm install

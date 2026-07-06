@@ -4,7 +4,11 @@ from openai import AsyncOpenAI
 
 from backend.app.agent.intents import detect_intent
 from backend.app.agent.state import AgentState
-from backend.app.agent.tool_calling import ToolCallingError, run_web_page_summary_tool_agent
+from backend.app.agent.tool_calling import (
+    ToolCallingError,
+    run_web_page_summary_tool_agent,
+    run_web_table_export_tool_agent,
+)
 from backend.app.core.config import get_settings
 from backend.app.db.repository import add_task_step, update_task
 
@@ -27,6 +31,18 @@ async def route_intent(state: AgentState) -> AgentState:
 async def summarize_current_page(state: AgentState) -> AgentState:
     try:
         result = await run_web_page_summary_tool_agent(
+            task_id=state["task_id"],
+            user_input=state["user_input"],
+        )
+    except ToolCallingError as exc:
+        return {**state, "error": str(exc)}
+
+    return {**state, **result}
+
+
+async def export_current_page_table(state: AgentState) -> AgentState:
+    try:
+        result = await run_web_table_export_tool_agent(
             task_id=state["task_id"],
             user_input=state["user_input"],
         )
