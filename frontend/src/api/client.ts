@@ -28,6 +28,12 @@ export function openEventStream(onEvent: (event: TaskEvent) => void, onError?: (
   const eventTypes = [
     "task.created",
     "task.started",
+    "task.plan.updated",
+    "tool.started",
+    "tool.finished",
+    "tool.call.requested",
+    "tool.observation.created",
+    "approval.required",
     "task.completed",
     "task.failed",
     "task.cancelled"

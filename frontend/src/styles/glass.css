@@ -1,0 +1,23 @@
+.glass-surface {
+  border: 1px solid var(--glass-border);
+  background: var(--glass-surface);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--glass-blur-md);
+  -webkit-backdrop-filter: var(--glass-blur-md);
+}
+
+.glass-surface-strong {
+  border: 1px solid var(--glass-border);
+  background: var(--glass-surface-strong);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
+}
+
+.glass-hairline::before {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+}

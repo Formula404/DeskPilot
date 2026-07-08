@@ -1,0 +1,24 @@
+:root {
+  --color-text: #f8fafc;
+  --color-text-soft: #e5eefc;
+  --color-accent: #2d6df6;
+  --color-accent-ring: rgba(45, 109, 246, 0.34);
+  --color-success: #35a852;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+  --focus-ring: rgba(77, 141, 255, 0.92);
+
+  --glass-border: rgba(202, 219, 255, 0.42);
+  --glass-border-muted: rgba(202, 219, 255, 0.36);
+  --glass-border-soft: rgba(202, 219, 255, 0.34);
+  --glass-surface: rgba(255, 255, 255, 0.16);
+  --glass-surface-strong: rgba(255, 255, 255, 0.24);
+  --glass-shadow: 0 14px 34px rgba(42, 91, 181, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --glass-blur-sm: blur(18px);
+  --glass-blur-md: blur(24px) saturate(1.5);
+  --glass-blur-lg: blur(30px) saturate(1.55);
+
+  --radius-pill: 999px;
+  --radius-card: 14px;
+  --radius-control: 12px;
+}

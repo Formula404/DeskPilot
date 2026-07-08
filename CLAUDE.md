@@ -8,7 +8,7 @@
 |---|---|
 | 桌面 UI | Tauri + React + Vite + TypeScript |
 | 前端状态 | Zustand |
-| 前端样式 | Tailwind CSS + shadcn/ui |
+| 前端样式 | 自定义 CSS + GSAP 动效 |
 | 本地服务 | Python 3.12 + FastAPI |
 | 包管理 | uv |
 | Agent 编排 | LangGraph + OpenAI Tool Calling |
@@ -62,11 +62,13 @@ DeskPilot/
   frontend/                 # Tauri + React 悬浮窗
     src/
       api/                  # 后端请求封装
-      components/           # 通用 UI 组件
-      features/             # 按功能拆分的业务组件
+      assets/               # 图标等静态资源
+      hooks/                # 通用 React hooks（窗口生命周期等）
+      motion/               # GSAP 动效系统（注册、常量、无障碍 hook）
       store/                # Zustand stores
-      styles/               # 样式
+      styles/               # 自定义 CSS（CSS 变量体系 + 组件样式）
       types/                # TypeScript 类型
+      views/                # 按窗口拆分的视图组件（每个视图一个文件）
   browser-extension/        # Manifest V3 浏览器扩展，浏览器上下文与动作执行通道
     src/
     public/
@@ -95,20 +97,6 @@ tools → db
 - `rpa` 不能依赖 `agent`
 - `frontend` 不能访问数据库，不能直接调用 OpenAI
 - `browser-extension` 不能访问数据库，不能调用 OpenAI，不能自行规划任务
-
-## 第一阶段目标（当前）
-
-打通网页总结闭环，并让第一个功能点就采用受限 tool calling Agent：
-
-```
-打开网页 → 唤起悬浮窗 → 输入"总结当前网页并保存"
-  → FastAPI 创建任务 → LangGraph 进入 tool calling loop
-  → LLM 调用 browser.collect_current_page
-  → LLM 总结并调用 file.write_markdown
-  → SSE 推送完成
-```
-
-第一阶段不做：微信 RPA、网易云音乐、OCR、pyautogui、向量检索、插件市场。
 
 ## 开发命令
 
