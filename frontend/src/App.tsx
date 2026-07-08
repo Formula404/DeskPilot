@@ -506,19 +506,9 @@ function OverlayView() {
         }
       }}
     >
-      <header className="overlay-topbar">
-        <div />
-        <div className="overlay-close-group" data-overlay-interactive="true">
-          <span>点击空白处或 Esc 关闭</span>
-          <button className="glass-icon-button" onClick={() => void hideCurrentWindow()} title="关闭">
-            <X size={22} />
-          </button>
-        </div>
-      </header>
-
       <section className="overlay-workspace">
         {mode !== "idle" ? (
-          <TaskExecutionPanel events={currentTaskEvents} mode={mode} currentTaskId={currentTaskId} onStop={stopTask} />
+          <TaskExecutionPanel events={currentTaskEvents} mode={mode} />
         ) : null}
 
         <section className="composer-area">
@@ -600,18 +590,13 @@ function CommandComposer({
 
 function TaskExecutionPanel({
   events,
-  mode,
-  currentTaskId,
-  onStop
+  mode
 }: {
   events: TaskEvent[];
   mode: OverlayMode;
-  currentTaskId: string | null;
-  onStop: () => void;
 }) {
-  const visibleEvents = events.slice(0, 8);
+  const visibleEvents = events.slice(-7);
   const hiddenEventCount = Math.max(events.length - visibleEvents.length, 0);
-  const latest = visibleEvents[0];
   const title =
     mode === "creating"
       ? "正在创建任务"
@@ -625,50 +610,27 @@ function TaskExecutionPanel({
 
   return (
     <aside className="task-side-panel" data-overlay-interactive="true">
-      <div className="task-panel">
-        <button className="glass-icon-button task-close" onClick={() => void hideCurrentWindow()} title="关闭">
-          <X size={22} />
-        </button>
-
-        <div className="task-title">
-          <span className="task-title-icon">
-            <Sparkles size={25} />
-          </span>
-          <div>
-            <h2>{title}</h2>
-            <p>{currentTaskId ?? "正在准备任务"}</p>
-          </div>
-        </div>
-
-        <ol className="task-steps">
-          {visibleEvents.length ? visibleEvents.map((event, index) => {
-            const status = mapEventStatus(event);
-            return (
-              <li key={event.event_id} className={`task-step is-${status}`}>
-                <span className="step-line" />
-                <span className="step-index">{status === "success" ? <Check size={18} /> : index + 1}</span>
-                <span className="step-message">{event.message}</span>
-                <span className="step-state">{status === "running" ? "运行中" : status === "waiting" ? "待确认" : status === "failed" ? "失败" : "完成"}</span>
-              </li>
-            );
-          }) : (
-            <li className="task-empty-state">等待后端返回任务事件...</li>
-          )}
-        </ol>
-        {hiddenEventCount > 0 ? <div className="task-overflow-note">还有 {hiddenEventCount} 条较早事件未显示</div> : null}
-
-        <div className="process-card">
-          <div className="process-heading">
-            <Clock3 size={20} />
-            <span>执行过程</span>
-          </div>
-          <p>{latest?.message ?? "正在等待后端任务事件..."}</p>
-          <button className="stop-button" onClick={onStop} disabled={!currentTaskId || mode !== "running"}>
-            <Square size={16} />
-            停止任务
-          </button>
-        </div>
+      <div className={`task-status-pill is-${mode}`}>
+        <Sparkles size={16} />
+        <span>{title}</span>
       </div>
+
+      <ol className="task-steps">
+        {hiddenEventCount > 0 ? <li className="task-overflow-note">已收起 {hiddenEventCount} 条较早事件</li> : null}
+        {visibleEvents.length ? visibleEvents.map((event, index) => {
+          const status = mapEventStatus(event);
+          const sequence = hiddenEventCount + index + 1;
+          return (
+            <li key={event.event_id} className={`task-step is-${status}`}>
+              <span className="step-index">{status === "success" ? <Check size={14} /> : sequence}</span>
+              <span className="step-message">{event.message}</span>
+              <span className="step-state">{status === "running" ? "运行中" : status === "waiting" ? "待确认" : status === "failed" ? "失败" : "完成"}</span>
+            </li>
+          );
+        }) : (
+          <li className="task-empty-state">等待后端返回任务事件...</li>
+        )}
+      </ol>
     </aside>
   );
 }

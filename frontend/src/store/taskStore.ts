@@ -16,6 +16,6 @@ export const useTaskStore = create<TaskState>((set) => ({
   clearEvents: () => set({ events: [] }),
   addEvent: (event) =>
     set((state) => ({
-      events: [event, ...state.events].slice(0, 50)
+      events: [...state.events, event].slice(-50)
     }))
 }));
