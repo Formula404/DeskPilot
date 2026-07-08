@@ -12,11 +12,54 @@
   "app": {
     "windows": [
       {
+        "label": "floating-ball",
         "title": "DeskPilot",
-        "width": 520,
-        "height": 680,
+        "width": 132,
+        "height": 132,
         "alwaysOnTop": true,
-        "resizable": true
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "skipTaskbar": true,
+        "visible": true
+      },
+      {
+        "label": "context-menu",
+        "title": "DeskPilot Menu",
+        "width": 188,
+        "height": 178,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
+        "label": "overlay",
+        "title": "",
+        "width": 1200,
+        "height": 800,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
+        "label": "settings",
+        "title": "DeskPilot 设置",
+        "width": 860,
+        "height": 600,
+        "alwaysOnTop": false,
+        "resizable": true,
+        "decorations": false,
+        "transparent": false,
+        "visible": false
       }
     ],
     "security": {

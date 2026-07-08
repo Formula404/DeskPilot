@@ -1,0 +1,325 @@
+{
+  "document": {
+    "id": "0:0",
+    "name": "DeskPilot UI System",
+    "type": "DOCUMENT",
+    "children": [
+      {
+        "id": "1:0",
+        "name": "03_Windows",
+        "type": "CANVAS",
+        "children": [
+          {
+            "id": "1:1",
+            "name": "FloatingBall",
+            "type": "FRAME",
+            "absoluteBoundingBox": {
+              "x": 0,
+              "y": 0,
+              "width": 420,
+              "height": 420
+            },
+            "backgroundColor": {
+              "r": 0.05,
+              "g": 0.07,
+              "b": 0.12
+            },
+            "children": [
+              {
+                "id": "1:1:1",
+                "name": "FloatingBall_Button",
+                "type": "ELLIPSE",
+                "absoluteBoundingBox": {
+                  "x": 160,
+                  "y": 160,
+                  "width": 80,
+                  "height": 80
+                }
+              },
+              {
+                "id": "1:1:2",
+                "name": "ContextMenu",
+                "type": "FRAME",
+                "absoluteBoundingBox": {
+                  "x": 250,
+                  "y": 140,
+                  "width": 180,
+                  "height": 200
+                },
+                "children": [
+                  {
+                    "id": "1:1:2:1",
+                    "name": "设置",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:1:2:2",
+                    "name": "个人信息",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:1:2:3",
+                    "name": "任务历史",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:1:2:4",
+                    "name": "退出",
+                    "type": "TEXT"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "1:2",
+            "name": "Overlay_Main",
+            "type": "FRAME",
+            "absoluteBoundingBox": {
+              "x": 500,
+              "y": 0,
+              "width": 1440,
+              "height": 900
+            },
+            "backgroundColor": {
+              "r": 0.03,
+              "g": 0.05,
+              "b": 0.10
+            },
+            "children": [
+              {
+                "id": "1:2:1",
+                "name": "Header",
+                "type": "FRAME",
+                "children": [
+                  {
+                    "id": "1:2:1:1",
+                    "name": "DeskPilot_Title",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:2:1:2",
+                    "name": "Context_Badge",
+                    "type": "TEXT"
+                  }
+                ]
+              },
+              {
+                "id": "1:2:2",
+                "name": "Suggestion_Area",
+                "type": "FRAME",
+                "children": [
+                  {
+                    "id": "1:2:2:1",
+                    "name": "总结当前网页",
+                    "type": "RECTANGLE"
+                  },
+                  {
+                    "id": "1:2:2:2",
+                    "name": "提取表格",
+                    "type": "RECTANGLE"
+                  },
+                  {
+                    "id": "1:2:2:3",
+                    "name": "保存Markdown",
+                    "type": "RECTANGLE"
+                  },
+                  {
+                    "id": "1:2:2:4",
+                    "name": "翻译页面",
+                    "type": "RECTANGLE"
+                  }
+                ]
+              },
+              {
+                "id": "1:2:3",
+                "name": "Command_Input",
+                "type": "FRAME",
+                "children": [
+                  {
+                    "id": "1:2:3:1",
+                    "name": "Input_Field",
+                    "type": "RECTANGLE"
+                  },
+                  {
+                    "id": "1:2:3:2",
+                    "name": "Send_Button",
+                    "type": "ELLIPSE"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "1:3",
+            "name": "Task_Execution",
+            "type": "FRAME",
+            "absoluteBoundingBox": {
+              "x": 0,
+              "y": 500,
+              "width": 1440,
+              "height": 900
+            },
+            "backgroundColor": {
+              "r": 0.02,
+              "g": 0.04,
+              "b": 0.08
+            },
+            "children": [
+              {
+                "id": "1:3:1",
+                "name": "Task_Header",
+                "type": "FRAME",
+                "children": [
+                  {
+                    "id": "1:3:1:1",
+                    "name": "任务执行",
+                    "type": "TEXT"
+                  }
+                ]
+              },
+              {
+                "id": "1:3:2",
+                "name": "Task_Steps",
+                "type": "FRAME",
+                "children": [
+                  {
+                    "id": "1:3:2:1",
+                    "name": "Step_1_读取网页",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:3:2:2",
+                    "name": "Step_2_提取正文",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:3:2:3",
+                    "name": "Step_3_生成摘要",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:3:2:4",
+                    "name": "Step_4_写入Markdown",
+                    "type": "TEXT"
+                  }
+                ]
+              },
+              {
+                "id": "1:3:3",
+                "name": "Execution_Log",
+                "type": "FRAME",
+                "children": [
+                  {
+                    "id": "1:3:3:1",
+                    "name": "AI_Process_Text",
+                    "type": "TEXT"
+                  }
+                ]
+              },
+              {
+                "id": "1:3:4",
+                "name": "Stop_Button",
+                "type": "RECTANGLE"
+              }
+            ]
+          },
+          {
+            "id": "1:4",
+            "name": "Settings_Window",
+            "type": "FRAME",
+            "absoluteBoundingBox": {
+              "x": 500,
+              "y": 500,
+              "width": 1000,
+              "height": 700
+            },
+            "backgroundColor": {
+              "r": 0.98,
+              "g": 0.98,
+              "b": 0.97
+            },
+            "children": [
+              {
+                "id": "1:4:1",
+                "name": "Sidebar",
+                "type": "FRAME",
+                "children": [
+                  {
+                    "id": "1:4:1:1",
+                    "name": "账号",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:4:1:2",
+                    "name": "通用",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:4:1:3",
+                    "name": "悬浮球",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:4:1:4",
+                    "name": "快捷键",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:4:1:5",
+                    "name": "权限",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:4:1:6",
+                    "name": "AI设置",
+                    "type": "TEXT"
+                  },
+                  {
+                    "id": "1:4:1:7",
+                    "name": "关于",
+                    "type": "TEXT"
+                  }
+                ]
+              },
+              {
+                "id": "1:4:2",
+                "name": "Content_Area",
+                "type": "FRAME",
+                "children": [
+                  {
+                    "id": "1:4:2:1",
+                    "name": "Account_Page",
+                    "type": "FRAME",
+                    "children": [
+                      {
+                        "id": "1:4:2:1:1",
+                        "name": "Avatar",
+                        "type": "ELLIPSE"
+                      },
+                      {
+                        "id": "1:4:2:1:2",
+                        "name": "本地模式",
+                        "type": "TEXT"
+                      },
+                      {
+                        "id": "1:4:2:1:3",
+                        "name": "User_ID",
+                        "type": "TEXT"
+                      },
+                      {
+                        "id": "1:4:2:1:4",
+                        "name": "Model_Status",
+                        "type": "TEXT"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

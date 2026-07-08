@@ -14,15 +14,20 @@ export async function createTask(message: string): Promise<ChatResponse> {
   return response.json();
 }
 
-export function openEventStream(onEvent: (event: TaskEvent) => void): EventSource {
+export async function cancelTask(taskId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/tasks/${taskId}/cancel`, {
+    method: "POST"
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to cancel task: ${response.status}`);
+  }
+}
+
+export function openEventStream(onEvent: (event: TaskEvent) => void, onError?: () => void): EventSource {
   const source = new EventSource(`${API_BASE}/events`);
   const eventTypes = [
     "task.created",
     "task.started",
-    "task.plan.updated",
-    "tool.started",
-    "tool.finished",
-    "approval.required",
     "task.completed",
     "task.failed",
     "task.cancelled"
@@ -32,5 +37,8 @@ export function openEventStream(onEvent: (event: TaskEvent) => void): EventSourc
       onEvent(JSON.parse((message as MessageEvent).data));
     });
   }
+  source.onerror = () => {
+    onError?.();
+  };
   return source;
 }
