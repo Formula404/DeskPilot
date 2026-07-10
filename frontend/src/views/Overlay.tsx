@@ -10,7 +10,7 @@ import { useReducedMotion } from "../motion/useReducedMotion";
 import { useWindowLifecycle } from "../hooks/useWindowLifecycle";
 import { CommandComposer } from "./CommandComposer";
 import { TaskExecutionPanel } from "./TaskPanel";
-import { hideCurrentWindow } from "./windowActions";
+import { hideCurrentWindow, isTauriRuntime } from "./windowActions";
 
 const suggestedActions: SuggestedAction[] = [
   {
@@ -41,6 +41,7 @@ const suggestedActions: SuggestedAction[] = [
 export function OverlayView() {
   const rootRef = useRef<HTMLElement | null>(null);
   const ignoreBlurUntilRef = useRef(0);
+  const openTimelineRef = useRef<gsap.core.Timeline | null>(null);
   const [message, setMessage] = useState("");
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -62,61 +63,115 @@ export function OverlayView() {
   }, [currentTaskEvents, currentTaskId, isCreatingTask]);
 
   const playOverlayOpenMotion = useCallback(() => {
-    ignoreBlurUntilRef.current = Date.now() + 350;
+    if (openTimelineRef.current?.isActive()) {
+      return;
+    }
+    ignoreBlurUntilRef.current = Date.now() + 1200;
     const overlay = rootRef.current;
     const gradient = rootRef.current?.querySelector("[data-motion='overlay-gradient']");
+    const scanBeam = rootRef.current?.querySelector("[data-motion='overlay-scan-beam']");
     const suggestions = rootRef.current?.querySelectorAll("[data-motion='suggestion-item']");
     const composer = rootRef.current?.querySelector("[data-motion='command-composer']");
     const spark = rootRef.current?.querySelector("[data-motion='composer-spark']");
 
-    if (!overlay || !gradient || !composer) {
+    if (!overlay || !gradient || !scanBeam || !composer) {
       return;
     }
 
+    const suggestionItems = Array.from(suggestions ?? []);
+    const composerRect = composer.getBoundingClientRect();
+    const composerStartY = Math.max(72, window.innerHeight - composerRect.top + 24);
     const targets = [
       overlay,
       gradient,
+      scanBeam,
       composer,
       ...(spark ? [spark] : []),
-      ...Array.from(suggestions ?? [])
+      ...suggestionItems
     ];
     gsap.killTweensOf(targets);
-    gsap.set(targets, { autoAlpha: 1, clearProps: "visibility" });
-    gsap.set(overlay, { x: 0, y: 0, scale: 1 });
-    gsap.set([gradient, composer, ...(suggestions ? Array.from(suggestions) : [])], { x: 0, y: 0, scale: 1 });
+    openTimelineRef.current?.kill();
+    gsap.set(overlay, { autoAlpha: 1, x: 0, y: 0, scale: 1, clearProps: "visibility" });
+    gsap.set(gradient, { autoAlpha: 0, x: 0, y: 18, scale: 1, clearProps: "visibility" });
+    gsap.set(scanBeam, {
+      autoAlpha: 0,
+      x: 0,
+      y: 0,
+      yPercent: 58,
+      scaleY: 1,
+      transformOrigin: "50% 100%",
+      clearProps: "visibility"
+    });
+    gsap.set(composer, {
+      autoAlpha: 0,
+      x: 0,
+      y: composerStartY,
+      scale: 0.985,
+      transformOrigin: "50% 100%",
+      clearProps: "visibility"
+    });
+    gsap.set(suggestionItems, {
+      autoAlpha: 0,
+      x: 0,
+      y: 22,
+      scale: 0.82,
+      transformOrigin: "50% 100%",
+      clearProps: "visibility"
+    });
+    gsap.set(spark ?? [], { autoAlpha: 0, rotation: -16, scale: 0.78, clearProps: "visibility" });
 
-    gsap.timeline({ defaults: { ease: motion.ease.out } })
+    openTimelineRef.current = gsap.timeline({
+      defaults: { ease: motion.ease.out },
+      onComplete: () => {
+        openTimelineRef.current = null;
+      }
+    })
       .fromTo(gradient, {
-        y: 24,
-      }, {
-        y: 0,
-        duration: getMotionDuration(motion.duration.panel, reduceMotion)
-      }, 0)
-      .fromTo(suggestions ?? [], {
-        y: 12,
-        scale: 0.98,
-      }, {
-        y: 0,
-        scale: 1,
-        duration: getMotionDuration(motion.duration.base, reduceMotion),
-        stagger: reduceMotion ? 0 : 0.035
-      }, 0.08)
-      .fromTo(composer, {
+        autoAlpha: 0,
         y: 18,
-        scale: 0.985,
       }, {
+        autoAlpha: 1,
+        y: 0,
+        duration: getMotionDuration(0.32, reduceMotion)
+      }, 0)
+      .fromTo(scanBeam, {
+        autoAlpha: reduceMotion ? 0 : 0.18,
+        yPercent: 58,
+        scaleY: 1
+      }, {
+        autoAlpha: reduceMotion ? 0 : 0.86,
+        yPercent: -62,
+        scaleY: 1,
+        duration: getMotionDuration(0.92, reduceMotion),
+        ease: "power2.out"
+      }, 0)
+      .to(scanBeam, {
+        autoAlpha: 0,
+        duration: getMotionDuration(0.18, reduceMotion),
+        ease: "power1.out"
+      }, 0.78)
+      .to(composer, {
+        autoAlpha: 1,
         y: 0,
         scale: 1,
-        duration: getMotionDuration(0.22, reduceMotion)
-      }, 0.13)
-      .fromTo(spark ?? [], {
-        rotation: -18,
-        scale: 0.85,
-      }, {
+        duration: getMotionDuration(0.42, reduceMotion),
+        ease: "power3.out"
+      }, 0)
+      .to(spark ?? [], {
+        autoAlpha: 1,
         rotation: 0,
         scale: 1,
-        duration: getMotionDuration(0.16, reduceMotion)
-      }, 0.18);
+        duration: getMotionDuration(0.16, reduceMotion),
+        ease: "back.out(1.45)"
+      }, 0.28)
+      .to(suggestionItems, {
+        autoAlpha: 1,
+        y: 0,
+        scale: 1,
+        duration: getMotionDuration(0.24, reduceMotion),
+        stagger: reduceMotion ? 0 : 0.042,
+        ease: "back.out(1.65)"
+      }, 0.34);
   }, [reduceMotion]);
 
   const resetOverlayMotionTargets = useCallback(() => {
@@ -125,30 +180,58 @@ export function OverlayView() {
     const suggestions = rootRef.current?.querySelectorAll("[data-motion='suggestion-item']");
     const composer = rootRef.current?.querySelector("[data-motion='command-composer']");
     const gradient = rootRef.current?.querySelector("[data-motion='overlay-gradient']");
+    const scanBeam = rootRef.current?.querySelector("[data-motion='overlay-scan-beam']");
     const spark = rootRef.current?.querySelector("[data-motion='composer-spark']");
-    const targets = [
-      ...(overlay ? [overlay] : []),
-      ...(panel ? [panel] : []),
+    const hiddenTargets = [
       ...(composer ? [composer] : []),
       ...(gradient ? [gradient] : []),
+      ...(scanBeam ? [scanBeam] : []),
       ...(spark ? [spark] : []),
       ...Array.from(suggestions ?? [])
     ];
+    const visibleTargets = [
+      ...(overlay ? [overlay] : []),
+      ...(panel ? [panel] : [])
+    ];
 
-    gsap.killTweensOf(targets);
-    gsap.set(targets, {
+    gsap.killTweensOf([...visibleTargets, ...hiddenTargets]);
+    openTimelineRef.current?.kill();
+    openTimelineRef.current = null;
+    gsap.set(visibleTargets, {
       autoAlpha: 1,
       x: 0,
       y: 0,
+      yPercent: 0,
       scale: 1,
+      scaleY: 1,
       rotation: 0,
       clearProps: "visibility"
+    });
+    gsap.set(hiddenTargets, {
+      autoAlpha: 0,
+      x: 0,
+      y: 0,
+      yPercent: 0,
+      scale: 1,
+      scaleY: 1,
+      rotation: 0
     });
   }, []);
 
   useGSAP(() => {
+    if (isTauriRuntime()) {
+      resetOverlayMotionTargets();
+      return () => {
+        openTimelineRef.current?.kill();
+        openTimelineRef.current = null;
+      };
+    }
     playOverlayOpenMotion();
-  }, { dependencies: [playOverlayOpenMotion], scope: rootRef });
+    return () => {
+      openTimelineRef.current?.kill();
+      openTimelineRef.current = null;
+    };
+  }, { dependencies: [playOverlayOpenMotion, resetOverlayMotionTargets], scope: rootRef });
 
   useGSAP(() => {
     const statusMessage = rootRef.current?.querySelector("[data-motion='status-message']");
@@ -171,46 +254,63 @@ export function OverlayView() {
     const suggestions = rootRef.current?.querySelectorAll("[data-motion='suggestion-item']");
     const composer = rootRef.current?.querySelector("[data-motion='command-composer']");
     const gradient = rootRef.current?.querySelector("[data-motion='overlay-gradient']");
+    const scanBeam = rootRef.current?.querySelector("[data-motion='overlay-scan-beam']");
+    const spark = rootRef.current?.querySelector("[data-motion='composer-spark']");
+    const suggestionItems = Array.from(suggestions ?? []);
+    const exitTargets = [
+      ...(composer ? [composer] : []),
+      ...(spark ? [spark] : []),
+      ...suggestionItems
+    ];
+    const animatedTargets = [
+      ...(panel ? [panel] : []),
+      ...(gradient ? [gradient] : []),
+      ...(scanBeam ? [scanBeam] : []),
+      ...exitTargets
+    ];
+
+    openTimelineRef.current?.kill();
+    openTimelineRef.current = null;
+    gsap.killTweensOf(animatedTargets);
 
     gsap.timeline({
-      defaults: { ease: motion.ease.in },
+      defaults: { ease: "power2.inOut" },
       onComplete: () => {
         void hideCurrentWindow().then(resetOverlayMotionTargets).finally(resolve);
       }
     })
       .to(panel ?? [], {
         autoAlpha: 0,
-        x: 8,
-        duration: getMotionDuration(0.1, reduceMotion)
-      }, 0)
-      .to(suggestions ?? [], {
-        autoAlpha: 0,
-        y: 6,
-        duration: getMotionDuration(0.1, reduceMotion),
-        stagger: reduceMotion ? 0 : 0.015
-      }, 0)
-      .to(composer ?? [], {
-        autoAlpha: 0,
         y: 12,
-        scale: 0.99,
         duration: getMotionDuration(0.12, reduceMotion)
-      }, 0.02)
-      .to(gradient ?? [], {
+      }, 0)
+      .to(exitTargets, {
         autoAlpha: 0,
         y: 18,
-        duration: getMotionDuration(0.12, reduceMotion)
-      }, 0.05)
+        scale: 0.985,
+        duration: getMotionDuration(0.16, reduceMotion)
+      }, 0)
+      .to(gradient ?? [], {
+        autoAlpha: 0,
+        y: 10,
+        duration: getMotionDuration(0.16, reduceMotion)
+      }, 0)
+      .to(scanBeam ?? [], {
+        autoAlpha: 0,
+        y: 14,
+        duration: getMotionDuration(0.08, reduceMotion)
+      }, 0)
       .to(rootRef.current, {
         autoAlpha: 0,
-        duration: getMotionDuration(0.12, reduceMotion)
-      }, 0.1);
+        duration: getMotionDuration(0.08, reduceMotion)
+      }, 0.08);
   }), [reduceMotion, resetOverlayMotionTargets]);
 
   const { closeWindow: closeOverlayWithMotion } = useWindowLifecycle({
     onOpen: playOverlayOpenMotion,
     onClose: runCloseMotion,
     closeOnBlur: true,
-    shouldIgnoreClose: () => Date.now() < ignoreBlurUntilRef.current
+    shouldIgnoreClose: (reason) => reason === "blur" && Date.now() < ignoreBlurUntilRef.current
   });
 
   useEffect(() => {
@@ -309,6 +409,7 @@ export function OverlayView() {
       }}
     >
       <div className="overlay-gradient" data-motion="overlay-gradient" />
+      <div className="overlay-scan-beam" data-motion="overlay-scan-beam" />
       <section className="overlay-workspace">
         {mode !== "idle" ? (
           <TaskExecutionPanel events={currentTaskEvents} mode={mode} />

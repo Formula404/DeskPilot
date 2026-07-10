@@ -19,6 +19,7 @@ export function FloatingBallView() {
   const orbRef = useRef<HTMLButtonElement | null>(null);
   const idleTimelineRef = useRef<gsap.core.Timeline | null>(null);
   const statusTimelineRef = useRef<gsap.core.Timeline | null>(null);
+  const hoverStateRef = useRef(false);
   const dragStateRef = useRef<{ startX: number; startY: number; dragging: boolean } | null>(null);
   const reduceMotion = useReducedMotion();
   const { events, currentTaskId } = useTaskStore();
@@ -28,10 +29,45 @@ export function FloatingBallView() {
     void initializeFloatingWindow();
   }, []);
 
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let stopped = false;
+
+    async function keepVisibleWhenIdle() {
+      try {
+        const [current, overlay] = await Promise.all([
+          Promise.resolve(Window.getCurrent()),
+          Window.getByLabel("overlay")
+        ]);
+        if (stopped) {
+          return;
+        }
+        const overlayVisible = overlay ? await overlay.isVisible() : false;
+        const floatingVisible = await current.isVisible();
+        if (!overlayVisible && !floatingVisible) {
+          await current.show();
+        }
+      } catch (error) {
+        console.warn("Failed to keep floating ball visible", error);
+      }
+    }
+
+    void keepVisibleWhenIdle();
+    const intervalId = window.setInterval(() => void keepVisibleWhenIdle(), 1200);
+    return () => {
+      stopped = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const { contextSafe } = useGSAP(() => {
     const orb = orbRef.current;
     const logo = rootRef.current?.querySelector("[data-motion='orb-logo']");
     const ring = rootRef.current?.querySelector("[data-motion='status-ring']");
+    const lightLayers = rootRef.current?.querySelectorAll("[data-motion~='orb-light']");
 
     if (!orb || !logo || !ring) {
       return;
@@ -39,6 +75,7 @@ export function FloatingBallView() {
 
     gsap.set(orb, { transformOrigin: "50% 50%", willChange: "transform, opacity" });
     gsap.set([logo, ring], { transformOrigin: "50% 50%", willChange: "transform, opacity" });
+    gsap.set(lightLayers ?? [], { rotation: 0, transformOrigin: "50% 50%", willChange: "transform, opacity" });
 
     const introTl = gsap.timeline({
       defaults: { ease: motion.ease.out },
@@ -122,6 +159,9 @@ export function FloatingBallView() {
   }
 
   const hoverOrb = contextSafe((hovered: boolean) => {
+    hoverStateRef.current = hovered;
+    const orbLight = rootRef.current?.querySelector("[data-motion~='orb-light-primary']");
+    const orbCaustic = rootRef.current?.querySelector("[data-motion~='orb-light-caustic']");
     if (hovered) {
       idleTimelineRef.current?.pause();
     } else {
@@ -130,7 +170,22 @@ export function FloatingBallView() {
     gsap.to(orbRef.current, {
       scale: hovered ? 1.045 : 1,
       duration: hovered ? motion.duration.fast : motion.duration.base,
-      ease: motion.ease.out
+      ease: motion.ease.out,
+      overwrite: "auto"
+    });
+    gsap.to(orbLight ?? [], {
+      rotation: hovered ? 180 : 0,
+      autoAlpha: hovered ? 1 : 0.76,
+      duration: getMotionDuration(hovered ? 0.72 : 0.58, reduceMotion),
+      ease: hovered ? "power3.out" : "power2.inOut",
+      overwrite: "auto"
+    });
+    gsap.to(orbCaustic ?? [], {
+      rotation: hovered ? -180 : 0,
+      autoAlpha: hovered ? 1 : 0.62,
+      duration: getMotionDuration(hovered ? 0.78 : 0.62, reduceMotion),
+      ease: hovered ? "power3.out" : "power2.inOut",
+      overwrite: "auto"
     });
   });
 
@@ -249,9 +304,11 @@ export function FloatingBallView() {
         onPointerEnter={() => hoverOrb(true)}
         onPointerLeave={() => hoverOrb(false)}
         onPointerDown={pressOrb}
-        onPointerUp={() => gsap.to(orbRef.current, { autoAlpha: 1, scale: 1, duration: motion.duration.fast, ease: motion.ease.out })}
+        onPointerUp={() => gsap.to(orbRef.current, { autoAlpha: 1, scale: hoverStateRef.current ? 1.045 : 1, duration: motion.duration.fast, ease: motion.ease.out })}
         title="打开 DeskPilot，拖动可移动，右键打开菜单"
       >
+        <span className="orb-glass-light" data-motion="orb-light orb-light-primary" />
+        <span className="orb-glass-caustic" data-motion="orb-light orb-light-caustic" />
         <img src={deskpilotWhiteIcon} alt="" className="orb-logo" data-motion="orb-logo" />
         <span className="status-ring" data-motion="status-ring" />
         <span className="status-dot" data-motion="status-dot" />

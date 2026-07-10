@@ -56,7 +56,7 @@
         "width": 860,
         "height": 600,
         "alwaysOnTop": false,
-        "resizable": true,
+        "resizable": false,
         "decorations": false,
         "transparent": false,
         "visible": false

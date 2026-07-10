@@ -4,25 +4,25 @@
 
 ## 技术栈
 
-| 层 | 技术 |
-|---|---|
-| 桌面 UI | Tauri + React + Vite + TypeScript |
-| 前端状态 | Zustand |
-| 前端样式 | 自定义 CSS + GSAP 动效 |
-| 本地服务 | Python 3.12 + FastAPI |
-| 包管理 | uv |
-| Agent 编排 | LangGraph + OpenAI Tool Calling |
-| 模型接入 | OpenAI SDK |
-| 数据库 | SQLite |
-| 长期记忆检索 | SQLite FTS5 |
-| 浏览器通道 | Chrome/Edge Manifest V3 + 本地 WebSocket/HTTP |
-| 浏览器自动化 | 扩展执行当前页轻量动作 + Playwright |
-| Windows 自动化 | pywin32 + pywinauto |
-| RPA 视觉 | mss + opencv-python + PaddleOCR |
-| 鼠标键盘 | pyautogui |
-| 表格 | openpyxl |
-| 实时事件 | SSE |
-| 测试 | pytest |
+| 层             | 技术                                          |
+| -------------- | --------------------------------------------- |
+| 桌面 UI        | Tauri + React + Vite + TypeScript             |
+| 前端状态       | Zustand                                       |
+| 前端样式       | 自定义 CSS + GSAP 动效                        |
+| 本地服务       | Python 3.12 + FastAPI                         |
+| 包管理         | uv                                            |
+| Agent 编排     | LangGraph + OpenAI Tool Calling               |
+| 模型接入       | OpenAI SDK                                    |
+| 数据库         | SQLite                                        |
+| 长期记忆检索   | SQLite FTS5                                   |
+| 浏览器通道     | Chrome/Edge Manifest V3 + 本地 WebSocket/HTTP |
+| 浏览器自动化   | 扩展执行当前页轻量动作 + Playwright           |
+| Windows 自动化 | pywin32 + pywinauto                           |
+| RPA 视觉       | mss + opencv-python + PaddleOCR               |
+| 鼠标键盘       | pyautogui                                     |
+| 表格           | openpyxl                                      |
+| 实时事件       | SSE                                           |
+| 测试           | pytest                                        |
 
 ## 架构
 
@@ -119,6 +119,12 @@ npm install
 npm run build
 # 在 Chrome/Edge 中加载 browser-extension/dist 目录
 ```
+
+## 问题日志维护
+
+项目开发过程中遇到重大问题时，必须维护 `report/问题日志.md`。
+
+修复这类问题时，除了修改代码和验证构建，还要在问题日志中记录：日期、现象、根因、解决方案、涉及文件、验证方式和后续注意点。不要只在对话中说明。
 
 ## 提交前检查
 

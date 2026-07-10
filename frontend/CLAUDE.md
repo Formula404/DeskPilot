@@ -4,15 +4,15 @@ Tauri + React + Vite + TypeScript，多窗口桌面悬浮助手。
 
 ## 技术栈
 
-| 用途 | 技术 |
-|---|---|
-| 框架 | React + Vite |
-| 语言 | TypeScript strict mode |
-| 状态管理 | Zustand |
-| 样式 | 自定义 CSS（CSS 变量 + 玻璃质感公共模式） |
-| 动效 | GSAP + @gsap/react + Flip |
-| 桌面壳 | Tauri |
-| 通信 | HTTP + SSE 连接本地 FastAPI |
+| 用途     | 技术                                      |
+| -------- | ----------------------------------------- |
+| 框架     | React + Vite                              |
+| 语言     | TypeScript strict mode                    |
+| 状态管理 | Zustand                                   |
+| 样式     | 自定义 CSS（CSS 变量 + 玻璃质感公共模式） |
+| 动效     | GSAP + @gsap/react + Flip                 |
+| 桌面壳   | Tauri                                     |
+| 通信     | HTTP + SSE 连接本地 FastAPI               |
 
 ## 为什么用自定义 CSS 而非 Tailwind
 
@@ -74,12 +74,12 @@ frontend/src/
 
 Tauri 配置了 4 个独立窗口，每个窗口加载同一前端但根据 `Window.getCurrent().label` 渲染不同视图：
 
-| 窗口 label | 视图组件 | 尺寸 | 特点 |
-|---|---|---|---|
-| `floating-ball` | `FloatingBallView` | 132×132 | 无边框、透明、置顶、可拖拽 |
-| `context-menu` | `ContextMenuView` | 188×178 | 无边框、透明、置顶、失焦自动隐藏 |
-| `overlay` | `OverlayView` | 全屏 | 无边框、透明、置顶、点击空白处关闭 |
-| `settings` | `SettingsView` | 860×600 | 无边框、非置顶、可缩放 |
+| 窗口 label        | 视图组件             | 尺寸     | 特点                               |
+| ----------------- | -------------------- | -------- | ---------------------------------- |
+| `floating-ball` | `FloatingBallView` | 132×132 | 无边框、透明、置顶、可拖拽         |
+| `context-menu`  | `ContextMenuView`  | 188×178 | 无边框、透明、置顶、失焦自动隐藏   |
+| `overlay`       | `OverlayView`      | 全屏     | 无边框、透明、置顶、点击空白处关闭 |
+| `settings`      | `SettingsView`     | 860×600 | 无边框、非置顶、可缩放             |
 
 ## 动效系统
 
@@ -89,6 +89,12 @@ Tauri 配置了 4 个独立窗口，每个窗口加载同一前端但根据 `Win
 - `useReducedMotion()` hook 监听 `prefers-reduced-motion: reduce` 媒体查询
 - CSS 也通过 `@media (prefers-reduced-motion: reduce)` 关闭所有 transition
 - 每个视图组件在打开时播放入场动效，关闭时播放出场动效
+
+## 问题日志维护
+
+前端开发中遇到重大体验或稳定性问题时，必须更新 `../report/问题日志.md`。
+
+记录内容应包含：日期、现象、根因、解决方案、涉及文件、验证方式和后续注意点。
 
 ## 视图组件规范
 

@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
+import { Window } from "@tauri-apps/api/window";
 import { Bot, Clock3, Copy, Info, Keyboard, PanelRight, Settings, ShieldCheck, User, X } from "lucide-react";
-import { Flip, gsap, useGSAP } from "../motion/register";
+import deskpilotLogo from "../assets/deskpilot-logo.png";
+import { gsap, useGSAP } from "../motion/register";
 import { getMotionDuration, motion } from "../motion/constants";
 import { useReducedMotion } from "../motion/useReducedMotion";
 import { useWindowLifecycle } from "../hooks/useWindowLifecycle";
-import { hideCurrentWindow } from "./windowActions";
+import { hideCurrentWindow, isTauriRuntime } from "./windowActions";
 
 const settingsNav = [
   { label: "账号", icon: User },
@@ -20,6 +22,7 @@ export function SettingsView() {
   const [active, setActive] = useState("账号");
   const [displayedActive, setDisplayedActive] = useState("账号");
   const switchingRef = useRef(false);
+  const dragStateRef = useRef<{ startX: number; startY: number; dragging: boolean } | null>(null);
   const reduceMotion = useReducedMotion();
 
   const playSettingsOpenMotion = useCallback(() => {
@@ -42,23 +45,23 @@ export function SettingsView() {
       ...Array.from(pageItems ?? [])
     ];
     gsap.killTweensOf(targets);
-    gsap.set(targets, { autoAlpha: 1, clearProps: "visibility" });
-    gsap.set(targets, { x: 0, y: 0, scale: 1 });
+    gsap.set(targets, { x: 0, y: 0, scale: 1, clearProps: "visibility" });
 
     gsap.timeline({ defaults: { ease: motion.ease.out } })
-      .fromTo(sidebar ?? [], { x: -14 }, { x: 0, duration: getMotionDuration(0.2, reduceMotion) }, 0)
-      .fromTo(logo ?? [], { y: -4 }, { y: 0, duration: getMotionDuration(0.16, reduceMotion) }, 0.05)
+      .fromTo(stage, { autoAlpha: 0 }, { autoAlpha: 1, duration: getMotionDuration(0.14, reduceMotion) }, 0)
+      .fromTo(sidebar ?? [], { autoAlpha: 0 }, { autoAlpha: 1, duration: getMotionDuration(0.14, reduceMotion) }, 0)
+      .fromTo(logo ?? [], { autoAlpha: 0 }, { autoAlpha: 1, duration: getMotionDuration(0.14, reduceMotion) }, 0.02)
       .from(navItems ?? [], {
-        x: -8,
+        autoAlpha: 0,
         duration: getMotionDuration(0.16, reduceMotion),
         stagger: reduceMotion ? 0 : motion.stagger.tight
-      }, 0.08)
-      .fromTo(content ?? [], { y: 10 }, { y: 0, duration: getMotionDuration(0.2, reduceMotion) }, 0.1)
+      }, 0.04)
+      .fromTo(content ?? [], { autoAlpha: 0 }, { autoAlpha: 1, duration: getMotionDuration(0.16, reduceMotion) }, 0.05)
       .from(pageItems ?? [], {
-        y: 8,
+        autoAlpha: 0,
         duration: getMotionDuration(0.16, reduceMotion),
         stagger: reduceMotion ? 0 : motion.stagger.normal
-      }, 0.16);
+      }, 0.08);
   }, [reduceMotion]);
 
   const resetSettingsMotionTargets = useCallback(() => {
@@ -94,7 +97,6 @@ export function SettingsView() {
     }
     gsap.from(pageItems, {
       autoAlpha: 0,
-      y: 8,
       duration: getMotionDuration(0.16, reduceMotion),
       stagger: reduceMotion ? 0 : motion.stagger.normal,
       ease: motion.ease.out
@@ -108,29 +110,25 @@ export function SettingsView() {
     }
     switchingRef.current = true;
     setActive(nextActive);
-    const card = rootRef.current?.querySelector("[data-motion='settings-card']");
-    const state = card ? Flip.getState(card) : null;
 
     gsap.timeline({
       defaults: { ease: motion.ease.out },
       onComplete: () => {
         setDisplayedActive(nextActive);
-        window.setTimeout(() => {
-          if (state && card) {
-            Flip.from(state, {
-              targets: card,
-              duration: getMotionDuration(0.18, reduceMotion),
-              ease: motion.ease.out,
-              simple: true
-            });
-          }
+        window.requestAnimationFrame(() => {
+          gsap.fromTo(rootRef.current?.querySelector("[data-motion='settings-card-body']") ?? [], {
+            autoAlpha: 0
+          }, {
+            autoAlpha: 1,
+            duration: getMotionDuration(0.12, reduceMotion),
+            ease: motion.ease.out
+          });
           switchingRef.current = false;
-        }, 0);
+        });
       }
     })
       .to(rootRef.current?.querySelector("[data-motion='settings-card-body']") ?? [], {
         autoAlpha: 0,
-        y: -6,
         duration: getMotionDuration(0.1, reduceMotion)
       });
   }, [displayedActive, reduceMotion]);
@@ -144,18 +142,15 @@ export function SettingsView() {
     })
       .to(rootRef.current?.querySelector("[data-motion='settings-content']") ?? [], {
         autoAlpha: 0,
-        y: 8,
         duration: getMotionDuration(0.12, reduceMotion)
       }, 0)
       .to(rootRef.current?.querySelectorAll("[data-motion='settings-nav-item']") ?? [], {
         autoAlpha: 0,
-        x: -4,
         duration: getMotionDuration(0.1, reduceMotion),
         stagger: reduceMotion ? 0 : 0.015
       }, 0.02)
       .to(rootRef.current?.querySelector("[data-motion='settings-sidebar']") ?? [], {
         autoAlpha: 0,
-        x: -8,
         duration: getMotionDuration(0.12, reduceMotion)
       }, 0.06)
       .to(rootRef.current ?? [], {
@@ -166,17 +161,61 @@ export function SettingsView() {
 
   const { closeWindow: closeSettingsWithMotion } = useWindowLifecycle({
     onOpen: playSettingsOpenMotion,
-    onClose: runCloseMotion
+    onClose: runCloseMotion,
+    replayOnFocus: false
   });
 
+  function startWindowDrag(event: ReactMouseEvent<HTMLElement>) {
+    if (event.button !== 0 || !isTauriRuntime()) {
+      return;
+    }
+    if ((event.target as HTMLElement).closest("button, input, textarea, select, a, [data-no-window-drag]")) {
+      return;
+    }
+
+    dragStateRef.current = {
+      startX: event.screenX,
+      startY: event.screenY,
+      dragging: false
+    };
+
+    function cleanup() {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    }
+
+    function onMouseMove(moveEvent: MouseEvent) {
+      const state = dragStateRef.current;
+      if (!state || state.dragging) {
+        return;
+      }
+      const distance = Math.hypot(moveEvent.screenX - state.startX, moveEvent.screenY - state.startY);
+      if (distance < 4) {
+        return;
+      }
+      state.dragging = true;
+      Window.getCurrent().startDragging().catch((error) => {
+        console.warn("Failed to start dragging settings window", error);
+      });
+      cleanup();
+    }
+
+    function onMouseUp() {
+      dragStateRef.current = null;
+      cleanup();
+    }
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }
+
   return (
-    <main ref={rootRef} className="settings-stage" data-motion="settings-stage">
+    <main ref={rootRef} className="settings-stage" data-motion="settings-stage" onMouseDown={startWindowDrag}>
       <aside className="settings-sidebar" data-motion="settings-sidebar">
         <div className="settings-logo" data-motion="settings-logo">
-          <span className="settings-logo-mark">D</span>
-          <strong>DeskPilot</strong>
+          <img src={deskpilotLogo} alt="DeskPilot" />
         </div>
-        <nav>
+        <nav data-no-window-drag>
           {settingsNav.map((item) => {
             const Icon = item.icon;
             return (
@@ -197,7 +236,7 @@ export function SettingsView() {
       <section className="settings-content" data-motion="settings-content">
         <header className="settings-window-bar">
           <span>设置页面</span>
-          <div className="window-dots">
+          <div className="window-dots" data-no-window-drag>
             <span />
             <span />
             <button onClick={() => void closeSettingsWithMotion()} title="关闭">
@@ -206,7 +245,7 @@ export function SettingsView() {
           </div>
         </header>
 
-        <div className="settings-card" data-motion="settings-card">
+        <div className="settings-card" data-motion="settings-card" data-no-window-drag>
           <div data-motion="settings-card-body">
             <h1 data-motion="settings-page-item">{displayedActive}</h1>
             {displayedActive === "账号" ? <AccountSettings /> : <GenericSettings active={displayedActive} />}

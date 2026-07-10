@@ -2,13 +2,15 @@ import { useCallback, useEffect, useRef } from "react";
 import { Window } from "@tauri-apps/api/window";
 import { isTauriRuntime } from "../views/windowActions";
 
+export type WindowCloseReason = "manual" | "escape" | "blur";
+
 interface WindowLifecycleOptions {
   onClose: () => void | Promise<void>;
   onOpen?: () => void;
   closeOnBlur?: boolean;
   closeOnEscape?: boolean;
   replayOnFocus?: boolean;
-  shouldIgnoreClose?: () => boolean;
+  shouldIgnoreClose?: (reason: WindowCloseReason) => boolean;
 }
 
 export function useWindowLifecycle({
@@ -25,8 +27,8 @@ export function useWindowLifecycle({
     closingRef.current = false;
   }, []);
 
-  const closeWindow = useCallback(async () => {
-    if (closingRef.current || shouldIgnoreClose?.()) {
+  const closeWindow = useCallback(async (reason: WindowCloseReason = "manual") => {
+    if (closingRef.current || shouldIgnoreClose?.(reason)) {
       return;
     }
     closingRef.current = true;
@@ -44,7 +46,7 @@ export function useWindowLifecycle({
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        void closeWindow();
+        void closeWindow("escape");
       }
     }
 
@@ -62,7 +64,7 @@ export function useWindowLifecycle({
     Window.getCurrent()
       .onFocusChanged(({ payload: focused }) => {
         if (!focused && closeOnBlur) {
-          void closeWindow();
+          void closeWindow("blur");
           return;
         }
         if (focused && replayOnFocus) {

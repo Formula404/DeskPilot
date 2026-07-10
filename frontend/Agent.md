@@ -90,6 +90,18 @@ Tauri 配置了 4 个独立窗口，每个窗口加载同一前端但根据 `Win
 - CSS 也通过 `@media (prefers-reduced-motion: reduce)` 关闭所有 transition
 - 每个视图组件在打开时播放入场动效，关闭时播放出场动效
 
+## 问题日志维护
+
+前端开发中遇到重大体验或稳定性问题时，必须更新 `../report/问题日志.md`。尤其是以下问题必须记录：
+
+- Tauri 多窗口 hide/show、focus、置顶、恢复异常
+- 悬浮球消失、overlay 卡死、点击后窗口不出现
+- GSAP 入场/退场闪烁、重复触发、不可打断、残留 inline style
+- 玻璃 UI 材质脏、首帧闪现、性能明显卡顿
+- 影响键盘操作、reduced-motion 或焦点可见性的无障碍问题
+
+记录内容应包含：日期、现象、根因、解决方案、涉及文件、验证方式和后续注意点。
+
 ## 视图组件规范
 
 每个视图组件遵循统一模式，公共逻辑由 `hooks/useWindowLifecycle` 承载：

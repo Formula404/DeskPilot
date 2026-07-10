@@ -55,6 +55,8 @@ export function restoreFloatingBall() {
   void showIfOverlayClosed();
   window.setTimeout(() => void showIfOverlayClosed(), 120);
   window.setTimeout(() => void showIfOverlayClosed(), 360);
+  window.setTimeout(() => void showIfOverlayClosed(), 900);
+  window.setTimeout(() => void showIfOverlayClosed(), 1800);
 }
 
 export async function showOverlayWindow() {
