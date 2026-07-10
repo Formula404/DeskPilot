@@ -23,12 +23,18 @@ export async function cancelTask(taskId: string): Promise<void> {
   }
 }
 
-export function openEventStream(onEvent: (event: TaskEvent) => void, onError?: () => void): EventSource {
+export function openEventStream(
+  onEvent: (event: TaskEvent) => void,
+  onError?: () => void,
+  onOpen?: () => void
+): EventSource {
   const source = new EventSource(`${API_BASE}/events`);
   const eventTypes = [
     "task.created",
     "task.started",
     "task.plan.updated",
+    "task.step.completed",
+    "task.step.failed",
     "tool.started",
     "tool.finished",
     "tool.call.requested",
@@ -43,6 +49,9 @@ export function openEventStream(onEvent: (event: TaskEvent) => void, onError?: (
       onEvent(JSON.parse((message as MessageEvent).data));
     });
   }
+  source.onopen = () => {
+    onOpen?.();
+  };
   source.onerror = () => {
     onError?.();
   };

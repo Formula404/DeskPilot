@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -116,7 +116,15 @@ def _record_task_step(
     status: str,
     input_data: Any = None,
     output_data: Any = None,
-) -> None:
+) -> dict[str, Any]:
+    step = {
+        "step_index": step_index,
+        "type": step_type,
+        "name": name,
+        "status": status,
+        "input": input_data,
+        "output": output_data,
+    }
     try:
         add_task_step(
             task_id,
@@ -129,6 +137,7 @@ def _record_task_step(
         )
     except Exception:
         logger.exception("Failed to record task step")
+    return step
 
 
 
@@ -142,6 +151,8 @@ async def _run_tool_agent(
     max_steps: int,
     before_tool_call: Callable[[str, dict[str, Any]], None] | None = None,
     after_tool_result: Callable[[str, ToolResult, dict[str, Any]], dict[str, Any]] | None = None,
+    on_step_recorded: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    start_step_index: int = 1,
 ) -> dict[str, Any]:
     settings = get_settings()
     if not settings.openai_api_key:
@@ -158,6 +169,7 @@ async def _run_tool_agent(
     ]
     artifacts: list[dict[str, str]] = []
     observations: list[dict[str, Any]] = []
+    last_step_index = start_step_index
 
     for _ in range(max_steps):
         response = await client.chat.completions.create(
@@ -172,18 +184,22 @@ async def _run_tool_agent(
         if not tool_calls:
             final_response = message.content or ""
             if artifacts:
-                _record_task_step(
+                last_step_index = start_step_index + len(observations) + 1
+                step = _record_task_step(
                     task_id=task_id,
-                    step_index=len(observations) + 2,
+                    step_index=last_step_index,
                     step_type="agent",
                     name="tool_calling_final",
                     status="completed",
                     output_data={"final_response": final_response, "artifacts": artifacts},
                 )
+                if on_step_recorded:
+                    await on_step_recorded(step)
                 return {
                     "final_response": final_response,
                     "artifacts": artifacts,
                     "observations": observations,
+                    "step_count": last_step_index,
                 }
 
             messages.append({"role": "user", "content": no_tool_fallback})
@@ -217,15 +233,18 @@ async def _run_tool_agent(
                 observation = _tool_error_observation(str(exc))
 
             observations.append({"tool": openai_name, "observation": observation})
-            _record_task_step(
+            last_step_index = start_step_index + len(observations)
+            step = _record_task_step(
                 task_id=task_id,
-                step_index=len(observations) + 1,
+                step_index=last_step_index,
                 step_type="tool",
                 name=openai_name,
                 status="completed" if observation["ok"] else "failed",
                 input_data={"arguments": arguments, "tool_call_id": tool_call.id},
                 output_data=observation,
             )
+            if on_step_recorded:
+                await on_step_recorded(step)
             messages.append(
                 {
                     "role": "tool",
@@ -245,6 +264,8 @@ async def run_web_page_summary_tool_agent(
     task_id: str,
     user_input: str,
     max_steps: int = 5,
+    on_step_recorded: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    start_step_index: int = 1,
 ) -> dict[str, Any]:
     has_page_context = False
     page_context_failed = False
@@ -287,6 +308,8 @@ async def run_web_page_summary_tool_agent(
         max_steps=max_steps,
         before_tool_call=before_tool_call,
         after_tool_result=after_tool_result,
+        on_step_recorded=on_step_recorded,
+        start_step_index=start_step_index,
     )
 
 
@@ -295,6 +318,8 @@ async def run_web_table_export_tool_agent(
     task_id: str,
     user_input: str,
     max_steps: int = 3,
+    on_step_recorded: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    start_step_index: int = 1,
 ) -> dict[str, Any]:
     return await _run_tool_agent(
         task_id=task_id,
@@ -315,4 +340,6 @@ async def run_web_table_export_tool_agent(
             "如果没有 HTML 表格，再调用 browser_export_structured_blocks_to_xlsx。"
         ),
         max_steps=max_steps,
+        on_step_recorded=on_step_recorded,
+        start_step_index=start_step_index,
     )

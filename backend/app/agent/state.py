@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 
 
@@ -10,6 +11,8 @@ class AgentState(TypedDict, total=False):
     intent: str
     plan: list[str]
     observations: list[dict[str, Any]]
+    step_count: int
     final_response: str
     artifacts: list[dict[str, str]]
     error: str | None
+    publish_step: Callable[[dict[str, Any]], Awaitable[None]]

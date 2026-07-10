@@ -1,11 +1,23 @@
 import { useMemo, useRef } from "react";
-import { Check, Sparkles } from "lucide-react";
+import { Check, Sparkles, Wrench } from "lucide-react";
 import type { TaskEvent } from "../types/api";
 import type { OverlayMode } from "../types/window";
 import { gsap, useGSAP } from "../motion/register";
 import { getMotionDuration, motion } from "../motion/constants";
 import { useReducedMotion } from "../motion/useReducedMotion";
-import { mapEventStatus } from "./taskStatus";
+import { isVisibleTaskStep, mapEventStatus } from "./taskStatus";
+
+function stepToolName(event: TaskEvent) {
+  const step = event.payload?.step;
+  if (!step || typeof step !== "object" || !("type" in step) || !("name" in step)) {
+    return null;
+  }
+  const typedStep = step as { type?: unknown; name?: unknown };
+  if (typedStep.type !== "tool" || typeof typedStep.name !== "string") {
+    return null;
+  }
+  return typedStep.name;
+}
 export function TaskExecutionPanel({
   events,
   mode
@@ -17,8 +29,9 @@ export function TaskExecutionPanel({
   const stepLoopRef = useRef<Map<string, gsap.core.Timeline>>(new Map());
   const previousCountRef = useRef(0);
   const reduceMotion = useReducedMotion();
-  const visibleEvents = useMemo(() => events.slice(-7), [events]);
-  const hiddenEventCount = Math.max(events.length - visibleEvents.length, 0);
+  const executionEvents = useMemo(() => events.filter(isVisibleTaskStep), [events]);
+  const visibleEvents = useMemo(() => executionEvents.slice(-5), [executionEvents]);
+  const hiddenEventCount = Math.max(executionEvents.length - visibleEvents.length, 0);
   const eventStatusSignature = useMemo(
     () => visibleEvents.reduce((signature, event) => `${signature};${event.event_id}:${mapEventStatus(event)}`, `${visibleEvents.length}`),
     [visibleEvents]
@@ -35,7 +48,7 @@ export function TaskExecutionPanel({
           : "任务执行";
 
   useGSAP(() => {
-    const panel = rootRef.current;
+    const panel = rootRef.current?.querySelector("[data-motion='task-panel']");
     const pill = rootRef.current?.querySelector("[data-motion='task-status-pill']");
     const steps = rootRef.current?.querySelectorAll("[data-motion='task-step']");
     if (!panel) {
@@ -73,7 +86,8 @@ export function TaskExecutionPanel({
       return;
     }
 
-    const latest = rootRef.current?.querySelector("[data-motion='task-step']:last-child");
+    const taskItems = rootRef.current?.querySelectorAll(".task-step[data-motion='task-step']");
+    const latest = taskItems?.[taskItems.length - 1];
     const index = latest?.querySelector("[data-motion='step-index']");
     const message = latest?.querySelector("[data-motion='step-message']");
     const state = latest?.querySelector("[data-motion='step-state']");
@@ -147,46 +161,46 @@ export function TaskExecutionPanel({
 
     if (mode === "completed") {
       stepLoopRef.current.forEach((timeline) => timeline.kill());
-      gsap.timeline()
-        .to(pill, { borderColor: "rgba(125, 220, 149, 0.7)", scale: 1.02, duration: getMotionDuration(0.16, reduceMotion), ease: motion.ease.out })
-        .to(pill, { scale: 1, duration: getMotionDuration(0.18, reduceMotion), ease: motion.ease.out });
+      gsap.set(pill, { clearProps: "transform" });
     }
 
     if (mode === "failed" || mode === "cancelled") {
       stepLoopRef.current.forEach((timeline) => timeline.kill());
-      gsap.to(pill, {
-        keyframes: mode === "failed"
-          ? [{ x: -2, duration: 0.04 }, { x: 2, duration: 0.05 }, { x: 0, duration: 0.05 }]
-          : [{ scale: 0.99, duration: 0.08 }, { scale: 1, duration: 0.12 }],
-        ease: motion.ease.out
-      });
+      gsap.set(pill, { clearProps: "transform" });
     }
   }, { dependencies: [mode, reduceMotion], scope: rootRef });
 
   return (
-    <aside ref={rootRef} className="task-side-panel" data-overlay-interactive="true" data-motion="task-panel">
-      <div className={`task-status-pill is-${mode}`} data-motion="task-status-pill">
-        <span className="status-sweep" data-motion="status-sweep" />
-        <Sparkles size={16} />
-        <span>{title}</span>
-      </div>
+    <aside ref={rootRef} className="task-side-panel" data-overlay-interactive="true">
+      <div className="task-panel-content" data-motion="task-panel">
+        <div className={`task-status-pill is-${mode}`} data-motion="task-status-pill">
+          <span className="status-sweep" data-motion="status-sweep" />
+          <Sparkles size={16} />
+          <span>{title}</span>
+        </div>
 
-      <ol className="task-steps" data-motion="task-steps">
-        {hiddenEventCount > 0 ? <li className="task-overflow-note" data-motion="task-step">已收起 {hiddenEventCount} 条较早事件</li> : null}
-        {visibleEvents.length ? visibleEvents.map((event, index) => {
-          const status = mapEventStatus(event);
-          const sequence = hiddenEventCount + index + 1;
-          return (
-            <li key={event.event_id} className={`task-step is-${status}`} data-motion="task-step" data-event-id={event.event_id}>
-              <span className="step-index" data-motion="step-index">{status === "success" ? <Check size={14} /> : sequence}</span>
-              <span className="step-message" data-motion="step-message">{event.message}</span>
-              <span className="step-state" data-motion="step-state">{status === "running" ? "运行中" : status === "waiting" ? "待确认" : status === "failed" ? "失败" : status === "cancelled" ? "已取消" : "完成"}</span>
-            </li>
-          );
-        }) : (
-          <li className="task-empty-state" data-motion="task-step">等待后端返回任务事件...</li>
-        )}
-      </ol>
+        <ol className="task-steps" data-motion="task-steps">
+          {visibleEvents.length ? visibleEvents.map((event, index) => {
+            const status = mapEventStatus(event);
+            const sequence = hiddenEventCount + index + 1;
+            return (
+              <li key={event.event_id} className={`task-step is-${status}`} data-motion="task-step" data-event-id={event.event_id}>
+                <span className="step-index" data-motion="step-index">{status === "success" ? <Check size={14} /> : stepToolName(event) ? <Wrench size={13} /> : sequence}</span>
+                <span className="step-message" data-motion="step-message" title={stepToolName(event) ?? event.message}>
+                  {event.message}
+                  {stepToolName(event) ? <span className="step-tool-name">{stepToolName(event)}</span> : null}
+                </span>
+                <span className="step-state" data-motion="step-state">{status === "running" ? "运行中" : status === "waiting" ? "待确认" : status === "failed" ? "失败" : status === "cancelled" ? "已取消" : "完成"}</span>
+              </li>
+            );
+          }) : (
+            <li className="task-empty-state" data-motion="task-step">等待真实执行步骤...</li>
+          )}
+          {hiddenEventCount > 0 ? (
+            <li className="task-overflow-note" data-motion="task-step">已收起 {hiddenEventCount} 条较早事件</li>
+          ) : null}
+        </ol>
+      </div>
     </aside>
   );
 }

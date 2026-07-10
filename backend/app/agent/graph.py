@@ -57,6 +57,21 @@ async def run_agent(
     context_id: str | None,
     event_bus: EventBus,
 ) -> dict[str, Any]:
+    async def publish_step(step: dict[str, Any]) -> None:
+        name = step.get("name") or "unknown"
+        step_type = step.get("type") or "agent"
+        status = step.get("status") or "completed"
+        if step_type == "tool":
+            message = f"调用工具 {name}"
+        elif name == "intent_router":
+            message = "识别任务意图"
+        elif name == "finalize":
+            message = "生成任务结果"
+        else:
+            message = "执行步骤完成"
+        event_type = "task.step.failed" if status == "failed" else "task.step.completed"
+        await event_bus.publish(event_type, message, task_id=task_id, payload={"step": step})
+
     await event_bus.publish("task.started", "任务开始执行", task_id=task_id)
     update_task(task_id, status="running")
     try:
@@ -67,6 +82,7 @@ async def run_agent(
                 "context_id": context_id,
                 "observations": [],
                 "artifacts": [],
+                "publish_step": publish_step,
             }
         )
     except Exception as exc:

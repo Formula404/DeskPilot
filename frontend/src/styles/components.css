@@ -212,13 +212,11 @@
   background:
     radial-gradient(ellipse at 16% 100%, rgba(124, 170, 255, 0.2), transparent 44%),
     radial-gradient(ellipse at 84% 100%, rgba(255, 134, 62, 0.16), transparent 42%),
-    linear-gradient(
-      to top,
+    linear-gradient(to top,
       rgba(7, 10, 20, 0.68) 0%,
       rgba(9, 14, 28, 0.5) 32%,
       rgba(13, 20, 38, 0.22) 68%,
-      transparent 100%
-    );
+      transparent 100%);
   pointer-events: none;
 }
 
@@ -229,14 +227,12 @@
   background:
     radial-gradient(ellipse at 18% 50%, rgba(124, 170, 255, 0.22), transparent 38%),
     radial-gradient(ellipse at 82% 50%, rgba(255, 134, 62, 0.15), transparent 38%),
-    linear-gradient(
-      to top,
+    linear-gradient(to top,
       transparent 30%,
       rgba(180, 209, 255, 0.05) 38%,
       rgba(191, 216, 255, 0.24) 47%,
       rgba(255, 180, 116, 0.13) 56%,
-      transparent 70%
-    );
+      transparent 70%);
   filter: blur(15px);
   opacity: 0;
   pointer-events: none;
@@ -645,22 +641,29 @@
   right: 32px;
   top: 50%;
   z-index: 2;
-  display: flex;
   width: min(340px, calc(100vw - 64px));
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
   transform: translateY(-50%);
   pointer-events: none;
+}
+
+.task-panel-content {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: start;
+  gap: 8px;
 }
 
 .task-status-pill {
   position: relative;
   display: inline-flex;
-  width: fit-content;
-  max-width: 100%;
+  width: max-content;
+  max-width: calc(100vw - 64px);
+  flex: 0 0 auto;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  margin: 0;
   overflow: hidden;
   border: 1px solid var(--glass-border);
   border-radius: 999px;
@@ -684,6 +687,7 @@
 .status-sweep {
   position: absolute;
   inset: -1px;
+  display: block;
   width: 56px;
   border-radius: inherit;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.42), transparent);
@@ -706,24 +710,77 @@
 }
 
 .task-status-pill svg,
-.task-status-pill span {
+.task-status-pill>span:not(.status-sweep) {
   position: relative;
   z-index: 1;
 }
 
+.task-status-pill .status-sweep {
+  position: absolute;
+  z-index: 0;
+}
+
 .task-status-pill.is-completed {
-  border-color: rgba(125, 220, 149, 0.48);
+  border-color: rgba(125, 220, 149, 0.72);
+  background:
+    radial-gradient(ellipse at 24% 18%, rgba(255, 255, 255, 0.42), transparent 38%),
+    radial-gradient(ellipse at 84% 86%, rgba(34, 197, 94, 0.34), transparent 46%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.24), rgba(54, 97, 76, 0.34) 52%, rgba(34, 197, 94, 0.24)),
+    rgba(24, 70, 48, 0.34);
+  box-shadow:
+    0 0 0 1px rgba(125, 220, 149, 0.16),
+    0 14px 34px rgba(34, 197, 94, 0.18),
+    0 3px 14px rgba(125, 220, 149, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -10px 18px rgba(34, 197, 94, 0.16);
+  color: #f2fff5;
 }
 
 .task-status-pill.is-failed,
 .task-status-pill.is-cancelled {
-  border-color: rgba(248, 113, 113, 0.52);
+  border-color: rgba(248, 113, 113, 0.76);
+  background:
+    radial-gradient(ellipse at 24% 18%, rgba(255, 255, 255, 0.38), transparent 38%),
+    radial-gradient(ellipse at 84% 86%, rgba(239, 68, 68, 0.34), transparent 46%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.22), rgba(111, 56, 66, 0.36) 52%, rgba(239, 68, 68, 0.22)),
+    rgba(80, 32, 40, 0.34);
+  box-shadow:
+    0 0 0 1px rgba(248, 113, 113, 0.16),
+    0 14px 34px rgba(239, 68, 68, 0.19),
+    0 3px 14px rgba(248, 113, 113, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -10px 18px rgba(239, 68, 68, 0.16);
+  color: #fff5f5;
+}
+
+.task-status-pill.is-completed::before {
+  background:
+    linear-gradient(112deg, rgba(255, 255, 255, 0.58), transparent 26%, rgba(125, 220, 149, 0.24) 52%, transparent 76%, rgba(255, 255, 255, 0.42)),
+    radial-gradient(ellipse at 18% 0%, rgba(255, 255, 255, 0.38), transparent 42%),
+    radial-gradient(ellipse at 72% 100%, rgba(34, 197, 94, 0.28), transparent 46%);
+  opacity: 0.78;
+}
+
+.task-status-pill.is-failed::before,
+.task-status-pill.is-cancelled::before {
+  background:
+    linear-gradient(112deg, rgba(255, 255, 255, 0.52), transparent 26%, rgba(248, 113, 113, 0.26) 52%, transparent 76%, rgba(255, 255, 255, 0.36)),
+    radial-gradient(ellipse at 18% 0%, rgba(255, 255, 255, 0.34), transparent 42%),
+    radial-gradient(ellipse at 72% 100%, rgba(239, 68, 68, 0.3), transparent 46%);
+  opacity: 0.8;
+}
+
+.task-status-pill.is-completed .status-sweep,
+.task-status-pill.is-failed .status-sweep,
+.task-status-pill.is-cancelled .status-sweep {
+  opacity: 0 !important;
 }
 
 .task-steps {
   display: grid;
+  width: 100%;
   gap: 8px;
-  margin: 0;
+  margin: 0 !important;
   padding: 0;
   list-style: none;
 }
@@ -767,7 +824,7 @@
 }
 
 .task-overflow-note {
-  justify-self: center;
+  justify-self: start;
   border-radius: 999px;
   background: rgba(42, 50, 70, 0.18);
   padding: 5px 11px;
@@ -822,6 +879,19 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.35;
+}
+
+.step-tool-name {
+  display: block;
+  overflow: hidden;
+  color: rgba(205, 219, 242, 0.68);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: none;
 }
 
 .step-state {
@@ -1187,6 +1257,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   *,
   *::before,
   *::after {
@@ -1194,4 +1265,3 @@
     transition-duration: 1ms !important;
   }
 }
-

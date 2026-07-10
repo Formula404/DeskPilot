@@ -10,6 +10,7 @@ import { useReducedMotion } from "../motion/useReducedMotion";
 import { useWindowLifecycle } from "../hooks/useWindowLifecycle";
 import { CommandComposer } from "./CommandComposer";
 import { TaskExecutionPanel } from "./TaskPanel";
+import { isVisibleTaskStep } from "./taskStatus";
 import { hideCurrentWindow, isTauriRuntime } from "./windowActions";
 
 const suggestedActions: SuggestedAction[] = [
@@ -38,10 +39,12 @@ const suggestedActions: SuggestedAction[] = [
     icon: Bot
   }
 ];
+
 export function OverlayView() {
   const rootRef = useRef<HTMLElement | null>(null);
   const ignoreBlurUntilRef = useRef(0);
   const openTimelineRef = useRef<gsap.core.Timeline | null>(null);
+  const streamErrorTimerRef = useRef<number | null>(null);
   const [message, setMessage] = useState("");
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -52,6 +55,10 @@ export function OverlayView() {
   const currentTaskEvents = useMemo(
     () => events.filter((event) => !currentTaskId || event.task_id === currentTaskId || event.task_id === null),
     [currentTaskId, events]
+  );
+  const hasVisibleTaskSteps = useMemo(
+    () => currentTaskEvents.some(isVisibleTaskStep),
+    [currentTaskEvents]
   );
   const mode = useMemo<OverlayMode>(() => {
     if (isCreatingTask) return "creating";
@@ -190,11 +197,10 @@ export function OverlayView() {
       ...Array.from(suggestions ?? [])
     ];
     const visibleTargets = [
-      ...(overlay ? [overlay] : []),
-      ...(panel ? [panel] : [])
+      ...(overlay ? [overlay] : [])
     ];
 
-    gsap.killTweensOf([...visibleTargets, ...hiddenTargets]);
+    gsap.killTweensOf([...visibleTargets, ...(panel ? [panel] : []), ...hiddenTargets]);
     openTimelineRef.current?.kill();
     openTimelineRef.current = null;
     gsap.set(visibleTargets, {
@@ -202,6 +208,15 @@ export function OverlayView() {
       x: 0,
       y: 0,
       yPercent: 0,
+      scale: 1,
+      scaleY: 1,
+      rotation: 0,
+      clearProps: "visibility"
+    });
+    gsap.set(panel ?? [], {
+      autoAlpha: 1,
+      x: 0,
+      y: 0,
       scale: 1,
       scaleY: 1,
       rotation: 0,
@@ -319,9 +334,29 @@ export function OverlayView() {
         setStreamError(null);
         addEvent(event);
       },
-      () => setStreamError("任务事件连接异常，正在尝试自动重连")
+      () => {
+        if (streamErrorTimerRef.current !== null) {
+          window.clearTimeout(streamErrorTimerRef.current);
+        }
+        streamErrorTimerRef.current = window.setTimeout(() => {
+          setStreamError("任务事件连接异常，请确认后端服务已在 127.0.0.1:8765 启动");
+        }, 1500);
+      },
+      () => {
+        if (streamErrorTimerRef.current !== null) {
+          window.clearTimeout(streamErrorTimerRef.current);
+          streamErrorTimerRef.current = null;
+        }
+        setStreamError(null);
+      }
     );
-    return () => source.close();
+    return () => {
+      if (streamErrorTimerRef.current !== null) {
+        window.clearTimeout(streamErrorTimerRef.current);
+        streamErrorTimerRef.current = null;
+      }
+      source.close();
+    };
   }, [addEvent]);
 
   async function submitTask(nextMessage: string) {
@@ -411,7 +446,7 @@ export function OverlayView() {
       <div className="overlay-gradient" data-motion="overlay-gradient" />
       <div className="overlay-scan-beam" data-motion="overlay-scan-beam" />
       <section className="overlay-workspace">
-        {mode !== "idle" ? (
+        {mode !== "idle" && hasVisibleTaskSteps ? (
           <TaskExecutionPanel events={currentTaskEvents} mode={mode} />
         ) : null}
 
