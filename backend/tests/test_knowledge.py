@@ -11,15 +11,19 @@ from backend.app.core.config import get_settings
 from backend.app.db.connection import init_db
 from backend.app.db.connection import connect
 from backend.app.knowledge import compiler
-from backend.app.knowledge.compiler import compile_source, review_proposal
+from backend.app.knowledge.compiler import KnowledgeCompileError, compile_source, review_proposal
 from backend.app.knowledge.lint import lint_knowledge
 from backend.app.knowledge.indexer import rebuild_index
 from backend.app.knowledge.markdown import parse_markdown_document, source_chunks
+from backend.app.knowledge.chinese_search import search_terms
+from backend.app.knowledge.obsidian import export_obsidian_vault
 from backend.app.knowledge.paths import ensure_knowledge_dirs, from_knowledge_relative
+from backend.app.knowledge.profiles import create_profile, switch_profile
 from backend.app.knowledge.repository import get_note, get_source, list_proposals
 from backend.app.knowledge.retrieval import search_knowledge
-from backend.app.knowledge.settings import get_knowledge_settings
+from backend.app.knowledge.settings import get_knowledge_settings, save_knowledge_settings
 from backend.app.knowledge.source_service import canonicalize_url, ingest_content, ingest_file
+from backend.app.knowledge.web_monitor import check_web_source, get_watch, set_watch
 from backend.app.main import app
 from backend.app.schemas.common import ToolResult
 
@@ -168,6 +172,16 @@ async def test_ingest_compile_search_and_deduplicate(knowledge_data_dir, monkeyp
     assert metadata["id"] == first["source_id"]
     assert source_chunks(snapshot_path.read_text(encoding="utf-8"))["chunk-001"]
 
+    client = TestClient(app)
+    note_list = client.get("/knowledge/notes").json()
+    assert note_list["total"] == 1
+    assert client.get(f"/knowledge/notes/{note['id']}").json()["sections"]["Summary"]
+    source_list = client.get("/knowledge/sources").json()
+    assert source_list["total"] == 1
+    assert source_list["items"][0]["snapshot_count"] == 1
+    snapshot = client.get(f"/knowledge/snapshots/{first['snapshot_id']}").json()
+    assert "Content" in snapshot["sections"]
+
     report = lint_knowledge()
     assert report["summary"]["errors"] == 0
 
@@ -216,6 +230,10 @@ async def test_source_update_creates_review_proposal(knowledge_data_dir, monkeyp
     assert compilation["pending"]
     proposal_id = compilation["pending"][0]["proposal_id"]
     assert list_proposals()[0]["id"] == proposal_id
+    proposal_detail = TestClient(app).get(f"/knowledge/proposals/{proposal_id}")
+    assert proposal_detail.status_code == 200
+    assert proposal_detail.json()["payload"]["operation"]["operation"] == "update_note"
+    assert proposal_detail.json()["target_note"]["id"] == note_id
     resolution = review_proposal(proposal_id, "accept")
     assert resolution["status"] == "accepted"
     assert get_note(note_id)["status"] == "active"
@@ -238,3 +256,121 @@ def test_knowledge_settings_api_persists_values(knowledge_data_dir) -> None:
     assert response.status_code == 200
     assert get_knowledge_settings().max_search_results == 12
     assert client.get("/knowledge/status").status_code == 200
+
+
+def test_docx_and_image_import(knowledge_data_dir, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from docx import Document
+    from PIL import Image
+
+    document_path = tmp_path / "research.docx"
+    document = Document()
+    document.add_heading("Research Notes", level=1)
+    document.add_paragraph("This document contains enough structured material for the knowledge importer.")
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Topic"
+    table.cell(0, 1).text = "Status"
+    table.cell(1, 0).text = "Profiles"
+    table.cell(1, 1).text = "Ready"
+    document.save(document_path)
+    docx_result = ingest_file(str(document_path))
+    assert docx_result["status"] == "created"
+
+    image_path = tmp_path / "scan.png"
+    Image.new("RGB", (320, 120), "white").save(image_path)
+    monkeypatch.setattr(
+        "backend.app.rpa.ocr.ocr_image",
+        lambda _: [{"text": "OCR imported knowledge content with sufficient detail.", "confidence": 0.98}],
+    )
+    image_result = ingest_file(str(image_path))
+    assert image_result["status"] == "created"
+
+
+def test_profile_isolation(knowledge_data_dir) -> None:
+    first = ingest_content(
+        source_type="user", title="Default Profile", content="Default profile knowledge content remains isolated from other profiles.",
+        canonical_uri="user://default-profile", capture_method="test",
+    )
+    profile = create_profile("Research")
+    switch_profile(profile["id"])
+    assert get_source(first["source_id"]) is None
+    second = ingest_content(
+        source_type="user", title="Research Profile", content="Research profile knowledge content is independently visible and searchable.",
+        canonical_uri="user://research-profile", capture_method="test",
+    )
+    assert get_source(second["source_id"]) is not None
+    assert not search_knowledge("Default Profile")
+    switch_profile("profile_default")
+    assert get_source(first["source_id"]) is not None
+    assert get_source(second["source_id"]) is None
+
+
+def test_created_profile_matches_api_contract(knowledge_data_dir) -> None:
+    profile = create_profile("Contract")
+    assert profile["is_active"] is False
+    assert profile["source_count"] == 0
+    assert profile["note_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_web_update_check_detects_change(knowledge_data_dir, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = ingest_content(
+        source_type="web", title="Watched Page", content="The original watched page has enough meaningful text for ingestion.",
+        canonical_uri="https://example.com/watched", capture_method="test",
+    )
+    set_watch(source["source_id"], True, 60)
+    async def fake_compile(source_id: str): return {"source_id": source_id, "committed": []}
+    monkeypatch.setattr("backend.app.knowledge.web_monitor.compile_source", fake_compile)
+
+    class FakeResponse:
+        text = "<html><title>Watched Page</title><body><article>The changed watched page now contains substantially different knowledge content.</article></body></html>"
+        status_code = 200
+        url = "https://example.com/watched"
+        def raise_for_status(self): return None
+
+    class FakeClient:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return None
+        async def get(self, url): return FakeResponse()
+
+    monkeypatch.setattr("backend.app.knowledge.web_monitor.httpx.AsyncClient", FakeClient)
+    result = await check_web_source(source["source_id"])
+    assert result["check_status"] == "changed"
+    assert get_watch(source["source_id"])["last_changed_at"] is not None
+
+
+def test_web_reingest_preserves_custom_watch_interval(knowledge_data_dir) -> None:
+    source = ingest_content(source_type="web", title="Interval", content="Initial page content long enough for the knowledge source.", canonical_uri="https://example.com/interval", capture_method="test")
+    set_watch(source["source_id"], True, 60)
+    settings = get_knowledge_settings().model_copy(update={"auto_watch_web_sources": True, "web_update_interval_minutes": 1440})
+    save_knowledge_settings(settings)
+    ingest_content(source_type="web", title="Interval", content="Changed page content remains long enough and must preserve its custom schedule.", canonical_uri="https://example.com/interval", capture_method="test")
+    assert get_watch(source["source_id"])["interval_minutes"] == 60
+
+
+def test_chinese_search_tokenization() -> None:
+    terms = search_terms("知识库支持中文全文检索")
+    assert "知识库" in terms
+    assert "全文" in terms
+
+
+@pytest.mark.asyncio
+async def test_obsidian_profile_export(knowledge_data_dir, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        compiler, "get_settings",
+        lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"),
+    )
+    source = ingest_content(
+        source_type="user", title="Obsidian Integration",
+        content="Obsidian integration exports profile notes and their traceable source material.",
+        canonical_uri="user://obsidian-integration", capture_method="test",
+    )
+    await compile_source(source["source_id"])
+    settings = get_knowledge_settings().model_copy(update={"obsidian_enabled": True})
+    save_knowledge_settings(settings)
+    result = export_obsidian_vault()
+    vault = __import__("pathlib").Path(result["vault_path"])
+    assert result["notes"] == 1
+    assert (vault / "Home.md").exists()
+    assert list((vault / "Notes").glob("*.md"))
+    assert (vault / ".obsidian" / "app.json").exists()

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import Any
 
 from backend.app.db.connection import connect
 from backend.app.db.repository import new_id, now_iso
 from backend.app.knowledge.markdown import normalize_title
+from backend.app.knowledge.profiles import active_profile_id, link_note, link_source
 
 
 def get_source(source_id: str) -> dict[str, Any] | None:
     with connect() as connection:
-        row = connection.execute("SELECT * FROM knowledge_sources WHERE id = ?", (source_id,)).fetchone()
+        row = connection.execute("SELECT s.* FROM knowledge_sources s JOIN knowledge_profile_sources ps ON ps.source_id=s.id WHERE s.id=? AND ps.profile_id=?", (source_id, active_profile_id())).fetchone()
     return dict(row) if row else None
 
 
@@ -19,8 +21,8 @@ def get_source_by_uri(source_type: str, canonical_uri: str | None) -> dict[str, 
         return None
     with connect() as connection:
         row = connection.execute(
-            "SELECT * FROM knowledge_sources WHERE source_type = ? AND canonical_uri = ?",
-            (source_type, canonical_uri),
+            "SELECT s.* FROM knowledge_sources s JOIN knowledge_profile_sources ps ON ps.source_id=s.id WHERE s.source_type=? AND s.canonical_uri=? AND ps.profile_id=?",
+            (source_type, canonical_uri, active_profile_id()),
         ).fetchone()
     return dict(row) if row else None
 
@@ -34,7 +36,8 @@ def create_source(
 ) -> dict[str, Any]:
     source_id = f"src_{new_id().replace('-', '')}"
     now = now_iso()
-    with connect() as connection:
+    try:
+      with connect() as connection:
         connection.execute(
             """
             INSERT INTO knowledge_sources
@@ -43,6 +46,13 @@ def create_source(
             """,
             (source_id, source_type, canonical_uri, title, sensitivity, now, now),
         )
+    except sqlite3.IntegrityError:
+      with connect() as connection:
+        row = connection.execute("SELECT id FROM knowledge_sources WHERE source_type=? AND canonical_uri=?", (source_type, canonical_uri)).fetchone()
+      if not row:
+        raise
+      source_id = str(row["id"])
+    link_source(source_id)
     return get_source(source_id) or {}
 
 
@@ -74,7 +84,7 @@ def update_source(
 def get_snapshot(snapshot_id: str) -> dict[str, Any] | None:
     with connect() as connection:
         row = connection.execute(
-            "SELECT * FROM knowledge_snapshots WHERE id = ?", (snapshot_id,)
+            "SELECT sn.* FROM knowledge_snapshots sn JOIN knowledge_profile_sources ps ON ps.source_id=sn.source_id WHERE sn.id=? AND ps.profile_id=?", (snapshot_id, active_profile_id())
         ).fetchone()
     if not row:
         return None
@@ -140,6 +150,67 @@ def list_source_snapshots(source_id: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def list_sources(
+    *,
+    query: str | None = None,
+    source_type: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    clauses = ["1 = 1"]
+    values: list[Any] = []
+    if query:
+        clauses.append("(title LIKE ? OR canonical_uri LIKE ?)")
+        values.extend([f"%{query}%", f"%{query}%"])
+    if source_type:
+        clauses.append("source_type = ?")
+        values.append(source_type)
+    if status:
+        clauses.append("status = ?")
+        values.append(status)
+    values.extend([limit, offset])
+    with connect() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT s.*,
+                   (SELECT COUNT(*) FROM knowledge_snapshots sn WHERE sn.source_id = s.id) AS snapshot_count,
+                   (SELECT COUNT(DISTINCT note_id) FROM knowledge_note_sources ns WHERE ns.source_id = s.id) AS note_count
+            FROM knowledge_sources s
+            JOIN knowledge_profile_sources ps ON ps.source_id = s.id
+            WHERE {' AND '.join(clauses)} AND ps.profile_id = ?
+            ORDER BY s.updated_at DESC LIMIT ? OFFSET ?
+            """,
+            [*values[:-2], active_profile_id(), *values[-2:]],
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def count_sources(
+    *,
+    query: str | None = None,
+    source_type: str | None = None,
+    status: str | None = None,
+) -> int:
+    clauses = ["1 = 1"]
+    values: list[Any] = []
+    if query:
+        clauses.append("(title LIKE ? OR canonical_uri LIKE ?)")
+        values.extend([f"%{query}%", f"%{query}%"])
+    if source_type:
+        clauses.append("source_type = ?")
+        values.append(source_type)
+    if status:
+        clauses.append("status = ?")
+        values.append(status)
+    with connect() as connection:
+        row = connection.execute(
+            f"SELECT COUNT(*) FROM knowledge_sources s JOIN knowledge_profile_sources ps ON ps.source_id=s.id WHERE {' AND '.join(clauses)} AND ps.profile_id=?",
+            [*values, active_profile_id()],
+        ).fetchone()
+    return int(row[0])
+
+
 def mark_source_notes_stale(source_id: str) -> int:
     with connect() as connection:
         cursor = connection.execute(
@@ -156,7 +227,7 @@ def mark_source_notes_stale(source_id: str) -> int:
 
 def get_note(note_id: str) -> dict[str, Any] | None:
     with connect() as connection:
-        row = connection.execute("SELECT * FROM knowledge_notes WHERE id = ?", (note_id,)).fetchone()
+        row = connection.execute("SELECT n.* FROM knowledge_notes n JOIN knowledge_profile_notes pn ON pn.note_id=n.id WHERE n.id=? AND pn.profile_id=?", (note_id, active_profile_id())).fetchone()
         if not row:
             return None
         item = dict(row)
@@ -186,8 +257,8 @@ def get_note(note_id: str) -> dict[str, Any] | None:
 def find_note_by_title(title: str) -> dict[str, Any] | None:
     with connect() as connection:
         row = connection.execute(
-            "SELECT * FROM knowledge_notes WHERE normalized_title = ? AND status != 'archived' LIMIT 1",
-            (normalize_title(title),),
+            "SELECT n.* FROM knowledge_notes n JOIN knowledge_profile_notes pn ON pn.note_id=n.id WHERE n.normalized_title=? AND n.status!='archived' AND pn.profile_id=? LIMIT 1",
+            (normalize_title(title), active_profile_id()),
         ).fetchone()
     return dict(row) if row else None
 
@@ -215,12 +286,39 @@ def list_notes(
     with connect() as connection:
         rows = connection.execute(
             f"""
-            SELECT * FROM knowledge_notes WHERE {' AND '.join(clauses)}
+            SELECT n.* FROM knowledge_notes n
+            JOIN knowledge_profile_notes pn ON pn.note_id=n.id
+            WHERE {' AND '.join(clauses)} AND pn.profile_id=?
             ORDER BY updated_at DESC LIMIT ? OFFSET ?
             """,
-            values,
+            [*values[:-2], active_profile_id(), *values[-2:]],
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def count_notes(
+    *,
+    query: str | None = None,
+    entity_type: str | None = None,
+    status: str | None = None,
+) -> int:
+    clauses = ["1 = 1"]
+    values: list[Any] = []
+    if query:
+        clauses.append("(title LIKE ? OR normalized_title LIKE ?)")
+        values.extend([f"%{query}%", f"%{normalize_title(query)}%"])
+    if entity_type:
+        clauses.append("entity_type = ?")
+        values.append(entity_type)
+    if status:
+        clauses.append("status = ?")
+        values.append(status)
+    with connect() as connection:
+        row = connection.execute(
+            f"SELECT COUNT(*) FROM knowledge_notes n JOIN knowledge_profile_notes pn ON pn.note_id=n.id WHERE {' AND '.join(clauses)} AND pn.profile_id=?",
+            [*values, active_profile_id()],
+        ).fetchone()
+    return int(row[0])
 
 
 def upsert_note(
@@ -268,6 +366,8 @@ def upsert_note(
                 updated_at,
             ),
         )
+
+    link_note(note_id)
 
 
 def link_note_source(
@@ -381,7 +481,15 @@ def create_proposal(
 def get_proposal(proposal_id: str) -> dict[str, Any] | None:
     with connect() as connection:
         row = connection.execute(
-            "SELECT * FROM knowledge_proposals WHERE id = ?", (proposal_id,)
+            """
+            SELECT p.* FROM knowledge_proposals p
+            JOIN knowledge_jobs j ON j.id = p.job_id
+            WHERE p.id = ? AND (
+              j.target_id IN (SELECT source_id FROM knowledge_profile_sources WHERE profile_id = ?)
+              OR p.target_note_id IN (SELECT note_id FROM knowledge_profile_notes WHERE profile_id = ?)
+            )
+            """,
+            (proposal_id, active_profile_id(), active_profile_id()),
         ).fetchone()
     return dict(row) if row else None
 
@@ -392,10 +500,14 @@ def list_proposals(status: str = "pending") -> list[dict[str, Any]]:
             """
             SELECT p.*, n.title AS target_title
             FROM knowledge_proposals p
+            JOIN knowledge_jobs j ON j.id = p.job_id
             LEFT JOIN knowledge_notes n ON n.id = p.target_note_id
-            WHERE p.status = ? ORDER BY p.created_at DESC
+            WHERE p.status = ? AND (
+              j.target_id IN (SELECT source_id FROM knowledge_profile_sources WHERE profile_id = ?)
+              OR p.target_note_id IN (SELECT note_id FROM knowledge_profile_notes WHERE profile_id = ?)
+            ) ORDER BY p.created_at DESC
             """,
-            (status,),
+            (status, active_profile_id(), active_profile_id()),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -424,12 +536,10 @@ def source_has_pending_proposals(source_id: str) -> bool:
 
 
 def knowledge_counts() -> dict[str, int]:
-    queries = {
-        "sources": "SELECT COUNT(*) FROM knowledge_sources WHERE status != 'archived'",
-        "snapshots": "SELECT COUNT(*) FROM knowledge_snapshots",
-        "notes": "SELECT COUNT(*) FROM knowledge_notes WHERE status != 'archived'",
-        "stale_notes": "SELECT COUNT(*) FROM knowledge_notes WHERE status = 'stale'",
-        "pending_proposals": "SELECT COUNT(*) FROM knowledge_proposals WHERE status = 'pending'",
-    }
+    profile_id = active_profile_id()
     with connect() as connection:
-        return {name: int(connection.execute(sql).fetchone()[0]) for name, sql in queries.items()}
+        sources = int(connection.execute("SELECT COUNT(*) FROM knowledge_profile_sources WHERE profile_id=?", (profile_id,)).fetchone()[0])
+        snapshots = int(connection.execute("SELECT COUNT(*) FROM knowledge_snapshots WHERE source_id IN (SELECT source_id FROM knowledge_profile_sources WHERE profile_id=?)", (profile_id,)).fetchone()[0])
+        notes = int(connection.execute("SELECT COUNT(*) FROM knowledge_profile_notes WHERE profile_id=?", (profile_id,)).fetchone()[0])
+        stale = int(connection.execute("SELECT COUNT(*) FROM knowledge_notes WHERE status='stale' AND id IN (SELECT note_id FROM knowledge_profile_notes WHERE profile_id=?)", (profile_id,)).fetchone()[0])
+    return {"sources": sources, "snapshots": snapshots, "notes": notes, "stale_notes": stale, "pending_proposals": len(list_proposals())}

@@ -7,6 +7,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from backend.app.db.repository import new_id, now_iso
 from backend.app.knowledge.indexer import index_source_path
+from backend.app.knowledge.document_parser import parse_document
 from backend.app.knowledge.markdown import atomic_write, render_source, sha256_text
 from backend.app.knowledge.models import Sensitivity, SourceFrontmatter
 from backend.app.knowledge.paths import ensure_knowledge_dirs, knowledge_root, relative_to_knowledge
@@ -100,6 +101,8 @@ def ingest_content(
             title=clean_title,
             sensitivity=sensitivity,
         )
+        # A globally deduplicated source may already have snapshots from another profile.
+        is_new_source = not bool(source.get("current_snapshot_id"))
 
     source_id = str(source["id"])
     content_hash = sha256_text(clean_content)
@@ -151,6 +154,15 @@ def ingest_content(
         status="updated" if was_update else "active",
     )
     index_source_path(path)
+    if source_type == "web":
+        from backend.app.knowledge.settings import get_knowledge_settings
+
+        if get_knowledge_settings().auto_watch_web_sources:
+            from backend.app.knowledge.web_monitor import set_watch
+            from backend.app.knowledge.web_monitor import get_watch
+
+            if not get_watch(source_id):
+                set_watch(source_id, True)
     return {
         "status": "updated" if was_update else "created",
         "source_id": source_id,
@@ -165,23 +177,24 @@ def ingest_file(path_value: str, *, sensitivity: Sensitivity = "normal") -> dict
     path = Path(path_value).expanduser().resolve()
     if not path.exists() or not path.is_file():
         raise KnowledgeIngestError("要导入的文件不存在。", "KNOWLEDGE_FILE_NOT_FOUND")
-    if path.suffix.lower() not in {".md", ".txt"}:
+    supported = {".md", ".txt", ".pdf", ".docx", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+    if path.suffix.lower() not in supported:
         raise KnowledgeIngestError(
-            "当前只支持导入 Markdown 和 TXT 文件。",
+            "当前支持 Markdown、TXT、PDF、DOCX 和常见图片文件。",
             "KNOWLEDGE_FILE_TYPE_UNSUPPORTED",
         )
-    if path.stat().st_size > 10 * 1024 * 1024:
-        raise KnowledgeIngestError("文件超过 10 MB 导入上限。", "KNOWLEDGE_FILE_TOO_LARGE")
+    if path.stat().st_size > 100 * 1024 * 1024:
+        raise KnowledgeIngestError("文件超过 100 MB 导入上限。", "KNOWLEDGE_FILE_TOO_LARGE")
     try:
-        content = path.read_text(encoding="utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise KnowledgeIngestError("文件不是有效的 UTF-8 文本。", "KNOWLEDGE_FILE_ENCODING_INVALID") from exc
+        parsed = parse_document(path)
+    except Exception as exc:
+        raise KnowledgeIngestError(str(exc), "KNOWLEDGE_FILE_PARSE_FAILED") from exc
     return ingest_content(
         source_type="file",
-        title=path.stem,
-        content=content,
+        title=parsed.title,
+        content=parsed.content,
         canonical_uri=path.as_uri(),
         sensitivity=sensitivity,
-        capture_method="file_import",
-        metadata={"original_path": str(path), "size_bytes": path.stat().st_size},
+        capture_method=parsed.capture_method,
+        metadata={"original_path": str(path), "size_bytes": path.stat().st_size, **parsed.metadata},
     )

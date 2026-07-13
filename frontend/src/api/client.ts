@@ -1,9 +1,17 @@
 import type {
   ChatResponse,
   KnowledgeLintResult,
+  KnowledgeNoteDetail,
+  KnowledgeNoteSummary,
+  KnowledgeProfile,
   KnowledgeProposal,
+  KnowledgeProposalDetail,
   KnowledgeSettings,
+  KnowledgeSnapshotDetail,
+  KnowledgeSourceDetail,
+  KnowledgeSourceSummary,
   KnowledgeStatus,
+  KnowledgeWebWatch,
   TaskEvent
 } from "../types/api";
 
@@ -89,10 +97,11 @@ export function getKnowledgeSettings(): Promise<KnowledgeSettings> {
 }
 
 export function updateKnowledgeSettings(settings: KnowledgeSettings): Promise<KnowledgeSettings> {
+  const { active_profile_id: _activeProfileId, root_path: _rootPath, ...payload } = settings;
   return apiJson<KnowledgeSettings>("/knowledge/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(settings)
+    body: JSON.stringify(payload)
   });
 }
 
@@ -102,6 +111,54 @@ export function ingestCurrentPage(): Promise<Record<string, unknown>> {
     headers: { "Content-Type": "application/json" },
     body: "{}"
   });
+}
+
+export async function getKnowledgeProfiles(): Promise<{ items: KnowledgeProfile[]; active_profile_id: string }> {
+  return apiJson("/knowledge/profiles");
+}
+
+export function createKnowledgeProfile(name: string, description = ""): Promise<KnowledgeProfile> {
+  return apiJson("/knowledge/profiles", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, description })
+  });
+}
+
+export function activateKnowledgeProfile(profileId: string): Promise<KnowledgeProfile> {
+  return apiJson(`/knowledge/profiles/${profileId}/activate`, { method: "POST" });
+}
+
+export function deleteKnowledgeProfile(profileId: string): Promise<{ ok: boolean }> {
+  return apiJson(`/knowledge/profiles/${profileId}`, { method: "DELETE" });
+}
+
+export function uploadKnowledgeFile(file: File): Promise<Record<string, unknown>> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("compile", "true");
+  return apiJson("/knowledge/ingest/upload", { method: "POST", body });
+}
+
+export async function getKnowledgeWatches(): Promise<KnowledgeWebWatch[]> {
+  const result = await apiJson<{ items: KnowledgeWebWatch[] }>("/knowledge/watches");
+  return result.items;
+}
+
+export function updateKnowledgeWatch(sourceId: string, enabled: boolean, intervalMinutes?: number): Promise<KnowledgeWebWatch> {
+  return apiJson(`/knowledge/sources/${sourceId}/watch`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled, interval_minutes: intervalMinutes })
+  });
+}
+
+export function checkKnowledgeSourceUpdate(sourceId: string): Promise<Record<string, unknown>> {
+  return apiJson(`/knowledge/sources/${sourceId}/check-update`, { method: "POST" });
+}
+
+export function exportObsidianVault(): Promise<{ vault_path: string; notes: number; sources: number }> {
+  return apiJson("/knowledge/obsidian/export", { method: "POST" });
 }
 
 export function lintKnowledge(): Promise<KnowledgeLintResult> {
@@ -127,4 +184,56 @@ export function resolveKnowledgeProposal(proposalId: string, decision: "accept" 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ decision })
   });
+}
+
+export async function getKnowledgeNotes(params: {
+  query?: string;
+  entityType?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<{ items: KnowledgeNoteSummary[]; total: number }> {
+  const search = new URLSearchParams();
+  if (params.query) search.set("query", params.query);
+  if (params.entityType) search.set("entity_type", params.entityType);
+  if (params.status) search.set("status", params.status);
+  search.set("limit", String(params.limit ?? 50));
+  search.set("offset", String(params.offset ?? 0));
+  return apiJson<{ items: KnowledgeNoteSummary[]; total: number }>(`/knowledge/notes?${search.toString()}`);
+}
+
+export function getKnowledgeNote(noteId: string): Promise<KnowledgeNoteDetail> {
+  return apiJson<KnowledgeNoteDetail>(`/knowledge/notes/${noteId}`);
+}
+
+export async function getKnowledgeSources(params: {
+  query?: string;
+  sourceType?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<{ items: KnowledgeSourceSummary[]; total: number }> {
+  const search = new URLSearchParams();
+  if (params.query) search.set("query", params.query);
+  if (params.sourceType) search.set("source_type", params.sourceType);
+  if (params.status) search.set("status", params.status);
+  search.set("limit", String(params.limit ?? 50));
+  search.set("offset", String(params.offset ?? 0));
+  return apiJson<{ items: KnowledgeSourceSummary[]; total: number }>(`/knowledge/sources?${search.toString()}`);
+}
+
+export function getKnowledgeSource(sourceId: string): Promise<KnowledgeSourceDetail> {
+  return apiJson<KnowledgeSourceDetail>(`/knowledge/sources/${sourceId}`);
+}
+
+export function getKnowledgeSnapshot(snapshotId: string): Promise<KnowledgeSnapshotDetail> {
+  return apiJson<KnowledgeSnapshotDetail>(`/knowledge/snapshots/${snapshotId}`);
+}
+
+export function getKnowledgeProposal(proposalId: string): Promise<KnowledgeProposalDetail> {
+  return apiJson<KnowledgeProposalDetail>(`/knowledge/proposals/${proposalId}`);
+}
+
+export function compileKnowledgeSource(sourceId: string): Promise<Record<string, unknown>> {
+  return apiJson<Record<string, unknown>>(`/knowledge/sources/${sourceId}/compile`, { method: "POST" });
 }

@@ -119,9 +119,10 @@ async def _run_knowledge_tool(
 
 
 async def ingest_knowledge(state: AgentState) -> AgentState:
-    path_match = re.search(r"[\"']([^\"']+\.(?:md|txt))[\"']", state["user_input"], re.IGNORECASE)
+    extensions = r"(?:md|txt|pdf|docx|png|jpe?g|webp|bmp|tiff?)"
+    path_match = re.search(rf"[\"']([^\"']+\.{extensions})[\"']", state["user_input"], re.IGNORECASE)
     if not path_match:
-        path_match = re.search(r"([A-Za-z]:[\\/][^\n]+?\.(?:md|txt))", state["user_input"], re.IGNORECASE)
+        path_match = re.search(rf"([A-Za-z]:[\\/][^\n]+?\.{extensions})", state["user_input"], re.IGNORECASE)
     tool_name = "knowledge.ingest_file" if path_match else "knowledge.ingest_current_page"
     payload = {"path": path_match.group(1).strip()} if path_match else {}
     next_state, result = await _run_knowledge_tool(state, tool_name, payload)
@@ -234,6 +235,7 @@ async def general_chat(state: AgentState) -> AgentState:
         return {
             **state,
             "final_response": "未配置 API Key，无法进行对话。请在 .env 中设置 OPENAI_API_KEY。",
+            "error": "未配置 API Key，无法进行对话。请在 .env 中设置 OPENAI_API_KEY。",
         }
 
     client = AsyncOpenAI(

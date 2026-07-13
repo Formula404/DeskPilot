@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import re
+import logging
 from pathlib import Path
 from typing import Any
 
 from backend.app.db.connection import connect
 from backend.app.knowledge.markdown import parse_markdown_document, split_sections
+from backend.app.knowledge.chinese_search import indexed_text, search_terms
 from backend.app.knowledge.models import NoteFrontmatter, SourceFrontmatter
 from backend.app.knowledge.paths import from_knowledge_relative, knowledge_root
 from backend.app.knowledge.paths import relative_to_knowledge
 from backend.app.knowledge.repository import link_note_source, upsert_note
+from backend.app.knowledge.profiles import DEFAULT_PROFILE_ID, active_profile_id, link_source, use_profile
+
+logger = logging.getLogger(__name__)
 
 
 def index_note_path(path: Path) -> dict[str, Any]:
@@ -30,7 +35,7 @@ def index_note_path(path: Path) -> dict[str, Any]:
                 frontmatter.title,
                 " ".join(frontmatter.aliases),
                 sections.get("Summary", ""),
-                body,
+                indexed_text(body),
                 " ".join(frontmatter.tags),
             ),
         )
@@ -49,13 +54,13 @@ def index_source_path(path: Path) -> dict[str, Any]:
             (object_id, object_kind, title, aliases, summary, body, tags)
             VALUES (?, 'source', ?, '', '', ?, '')
             """,
-            (frontmatter.snapshot_id, frontmatter.title, body),
+            (frontmatter.snapshot_id, frontmatter.title, indexed_text(body)),
         )
     return {"id": frontmatter.snapshot_id, "title": frontmatter.title, "kind": "source"}
 
 
 def _fts_expression(query: str) -> str:
-    terms = [term for term in re.findall(r"[\w\u4e00-\u9fff]+", query) if term]
+    terms = search_terms(query, 12) or [term for term in re.findall(r"[\w\u4e00-\u9fff]+", query) if term]
     return " OR ".join(f'"{term.replace(chr(34), "")}"' for term in terms[:12])
 
 
@@ -70,25 +75,43 @@ def search_index(query: str, limit: int = 8) -> list[dict[str, Any]]:
                     SELECT object_id, object_kind, title, summary,
                            bm25(knowledge_fts, 0, 0, 8, 3, 1, 2) AS rank
                     FROM knowledge_fts
-                    WHERE knowledge_fts MATCH ?
+                    WHERE knowledge_fts MATCH ? AND (
+                      (object_kind = 'note' AND object_id IN (
+                        SELECT note_id FROM knowledge_profile_notes WHERE profile_id = ?
+                      )) OR (object_kind = 'source' AND object_id IN (
+                        SELECT current_snapshot_id FROM knowledge_sources
+                        WHERE id IN (SELECT source_id FROM knowledge_profile_sources WHERE profile_id = ?)
+                      ))
+                    )
                     ORDER BY rank LIMIT ?
                     """,
-                    (expression, limit),
+                    (expression, active_profile_id(), active_profile_id(), limit),
                 ).fetchall()
         except Exception:
+            logger.exception("Knowledge FTS MATCH query failed; using LIKE fallback")
             rows = []
 
     results = [dict(row) for row in rows]
     seen = {str(item["object_id"]) for item in results}
+    fallback_terms = search_terms(query, 8) or [query]
+    text_clauses = " OR ".join("(title LIKE ? OR aliases LIKE ? OR body LIKE ?)" for _ in fallback_terms)
+    text_values = [value for term in fallback_terms for value in (f"%{term}%", f"%{term}%", f"%{term}%")]
     with connect() as connection:
         fallback = connection.execute(
-            """
+            f"""
             SELECT object_id, object_kind, title, summary, 1000.0 AS rank
             FROM knowledge_fts
-            WHERE title LIKE ? OR aliases LIKE ? OR body LIKE ?
+            WHERE ({text_clauses}) AND (
+              (object_kind = 'note' AND object_id IN (
+                SELECT note_id FROM knowledge_profile_notes WHERE profile_id = ?
+              )) OR (object_kind = 'source' AND object_id IN (
+                SELECT current_snapshot_id FROM knowledge_sources
+                WHERE id IN (SELECT source_id FROM knowledge_profile_sources WHERE profile_id = ?)
+              ))
+            )
             LIMIT ?
             """,
-            (f"%{query}%", f"%{query}%", f"%{query}%", limit),
+            (*text_values, active_profile_id(), active_profile_id(), limit),
         ).fetchall()
     for row in fallback:
         item = dict(row)
@@ -166,12 +189,14 @@ def rebuild_index() -> dict[str, int]:
                         (frontmatter.snapshot_id, frontmatter.id),
                     )
             index_source_path(path)
+            link_source(frontmatter.id, DEFAULT_PROFILE_ID)
             counts["sources"] += 1
         except Exception:
             counts["errors"] += 1
 
     note_documents: list[tuple[Path, NoteFrontmatter, dict[str, str], str]] = []
-    for path in (root / "notes").rglob("*.md"):
+    with use_profile(DEFAULT_PROFILE_ID):
+      for path in (root / "notes").rglob("*.md"):
         try:
             metadata, body = parse_markdown_document(path.read_text(encoding="utf-8"))
             frontmatter = NoteFrontmatter.model_validate(metadata)

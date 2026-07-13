@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +18,7 @@ from backend.app.core.logging import configure_logging
 from backend.app.core.paths import ensure_data_dirs
 from backend.app.db.connection import init_db
 from backend.app.knowledge.paths import ensure_knowledge_dirs
+from backend.app.knowledge.web_monitor import scheduler_loop
 
 
 def create_app() -> FastAPI:
@@ -25,7 +28,19 @@ def create_app() -> FastAPI:
     ensure_knowledge_dirs()
 
     settings = get_settings()
-    app = FastAPI(title="DeskPilot API", version="0.1.0")
+    scheduler_stop = asyncio.Event()
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        scheduler_stop.clear()
+        scheduler_task = asyncio.create_task(scheduler_loop(scheduler_stop))
+        try:
+            yield
+        finally:
+            scheduler_stop.set()
+            await scheduler_task
+
+    app = FastAPI(title="DeskPilot API", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

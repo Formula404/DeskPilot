@@ -117,6 +117,47 @@ def init_db() -> None:
               applied_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS knowledge_profiles (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              is_default INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_profile_sources (
+              profile_id TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              PRIMARY KEY(profile_id, source_id),
+              FOREIGN KEY(profile_id) REFERENCES knowledge_profiles(id) ON DELETE CASCADE,
+              FOREIGN KEY(source_id) REFERENCES knowledge_sources(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_profile_notes (
+              profile_id TEXT NOT NULL,
+              note_id TEXT NOT NULL,
+              PRIMARY KEY(profile_id, note_id),
+              FOREIGN KEY(profile_id) REFERENCES knowledge_profiles(id) ON DELETE CASCADE,
+              FOREIGN KEY(note_id) REFERENCES knowledge_notes(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_web_watches (
+              profile_id TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              enabled INTEGER NOT NULL DEFAULT 1,
+              interval_minutes INTEGER NOT NULL DEFAULT 1440,
+              last_checked_at TEXT,
+              last_changed_at TEXT,
+              next_check_at TEXT,
+              last_status TEXT,
+              last_error TEXT,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(profile_id, source_id),
+              FOREIGN KEY(profile_id) REFERENCES knowledge_profiles(id) ON DELETE CASCADE,
+              FOREIGN KEY(source_id) REFERENCES knowledge_sources(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS knowledge_sources (
               id TEXT PRIMARY KEY,
               source_type TEXT NOT NULL,
@@ -226,9 +267,33 @@ def init_db() -> None:
             );
             """
         )
+        watch_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(knowledge_web_watches)").fetchall()
+        }
+        if "last_changed_at" not in watch_columns:
+            connection.execute("ALTER TABLE knowledge_web_watches ADD COLUMN last_changed_at TEXT")
         connection.execute(
             """
             INSERT OR IGNORE INTO schema_migrations(version, name, applied_at)
             VALUES (1, 'knowledge_base_initial', datetime('now'))
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO knowledge_profiles
+            (id, name, description, is_default, created_at, updated_at)
+            VALUES ('profile_default', '默认知识库', 'DeskPilot 默认知识空间', 1, datetime('now'), datetime('now'))
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO knowledge_profile_sources(profile_id, source_id)
+            SELECT 'profile_default', id FROM knowledge_sources
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO knowledge_profile_notes(profile_id, note_id)
+            SELECT 'profile_default', id FROM knowledge_notes
             """
         )

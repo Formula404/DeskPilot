@@ -4,7 +4,7 @@ import { useWindowStore } from "../store/windowStore";
 
 export const FLOATING_CLOSED_SIZE = 132;
 export const CONTEXT_MENU_WIDTH = 188;
-export const CONTEXT_MENU_HEIGHT = 178;
+export const CONTEXT_MENU_HEIGHT = 216;
 
 export function isTauriRuntime() {
   return "__TAURI_INTERNALS__" in window;

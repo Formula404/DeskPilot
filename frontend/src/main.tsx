@@ -5,6 +5,7 @@ import "./styles/tokens.css";
 import "./styles/index.css";
 import "./styles/glass.css";
 import "./styles/components.css";
+import "./styles/knowledge.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

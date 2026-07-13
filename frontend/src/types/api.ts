@@ -13,6 +13,7 @@ export interface TaskEvent {
 }
 
 export interface KnowledgeStatus {
+  active_profile_id: string;
   sources: number;
   snapshots: number;
   notes: number;
@@ -24,14 +25,43 @@ export interface KnowledgeStatus {
 }
 
 export interface KnowledgeSettings {
+  active_profile_id: string;
   enabled: boolean;
   auto_compile: boolean;
   review_updates: boolean;
   allow_private_remote: boolean;
   max_search_results: number;
   auto_create_notes: boolean;
+  web_update_enabled: boolean;
+  web_update_interval_minutes: number;
+  auto_watch_web_sources: boolean;
+  obsidian_enabled: boolean;
+  obsidian_include_sources: boolean;
   purpose: string;
   root_path: string;
+}
+
+export interface KnowledgeProfile {
+  id: string;
+  name: string;
+  description: string;
+  is_default: number;
+  is_active: boolean;
+  source_count: number;
+  note_count: number;
+}
+
+export interface KnowledgeWebWatch {
+  source_id: string;
+  profile_id: string;
+  enabled: number;
+  interval_minutes: number;
+  last_checked_at: string | null;
+  last_changed_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  title: string;
+  canonical_uri: string;
 }
 
 export interface KnowledgeLintResult {
@@ -48,4 +78,100 @@ export interface KnowledgeProposal {
   target_title: string | null;
   created_at: string;
   status: string;
+}
+
+export interface KnowledgeNoteSummary {
+  id: string;
+  entity_type: string;
+  title: string;
+  status: string;
+  review_state: string;
+  sensitivity: string;
+  markdown_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeEvidenceRef {
+  note_id: string;
+  source_id: string;
+  snapshot_id: string | null;
+  evidence_anchor: string;
+  source_title: string;
+  canonical_uri: string | null;
+  sensitivity: string;
+}
+
+export interface KnowledgeRelation {
+  id: string;
+  relation_type: string;
+  to_note_id: string;
+  target_title: string;
+  confidence: number | null;
+}
+
+export interface KnowledgeNoteDetail extends KnowledgeNoteSummary {
+  frontmatter: {
+    aliases: string[];
+    tags: string[];
+    source_ids: string[];
+    manual_sections: string[];
+    generated_by: string;
+  };
+  sections: Record<string, string>;
+  content: string;
+  sources: KnowledgeEvidenceRef[];
+  relations: KnowledgeRelation[];
+}
+
+export interface KnowledgeSourceSummary {
+  id: string;
+  source_type: string;
+  canonical_uri: string | null;
+  title: string;
+  current_snapshot_id: string | null;
+  sensitivity: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  snapshot_count: number;
+  note_count: number;
+}
+
+export interface KnowledgeSnapshotSummary {
+  id: string;
+  source_id: string;
+  content_sha256: string;
+  markdown_path: string;
+  captured_at: string;
+  created_at: string;
+}
+
+export interface KnowledgeSourceDetail extends KnowledgeSourceSummary {
+  snapshots: KnowledgeSnapshotSummary[];
+}
+
+export interface KnowledgeSnapshotDetail extends KnowledgeSnapshotSummary {
+  frontmatter: Record<string, unknown>;
+  sections: Record<string, string>;
+  content: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface KnowledgeProposalDetail extends KnowledgeProposal {
+  payload: {
+    source_id: string;
+    snapshot_id: string;
+    operation: {
+      operation: string;
+      title: string;
+      entity_type: string;
+      summary: string;
+      overview: string;
+      details_markdown: string;
+      aliases: string[];
+      tags: string[];
+    };
+  } | null;
+  target_note: KnowledgeNoteDetail | null;
 }

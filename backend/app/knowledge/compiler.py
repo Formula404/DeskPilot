@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,8 @@ from backend.app.knowledge.repository import (
     upsert_note,
 )
 from backend.app.knowledge.settings import get_knowledge_settings
+
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeCompileError(RuntimeError):
@@ -150,6 +153,13 @@ def _validate_operation(
             raise KnowledgeCompileError("知识提案缺少标题。", "KNOWLEDGE_SCHEMA_INVALID")
         if not operation.evidence:
             raise KnowledgeCompileError("知识提案缺少来源证据。", "KNOWLEDGE_CITATION_MISSING")
+    if operation.operation in {"add_relation", "mark_conflict"}:
+        if not operation.target_note_id or not operation.relations:
+            raise KnowledgeCompileError("关系提案缺少目标条目或关系。", "KNOWLEDGE_SCHEMA_INVALID")
+        if not get_note(operation.target_note_id):
+            raise KnowledgeCompileError("关系提案的目标条目不存在。", "KNOWLEDGE_NOTE_NOT_FOUND")
+        if any(not get_note(relation.target_note_id) for relation in operation.relations):
+            raise KnowledgeCompileError("关系提案引用了不存在的关联条目。", "KNOWLEDGE_NOTE_NOT_FOUND")
     for evidence in operation.evidence:
         if evidence.source_id != source_id or evidence.snapshot_id != snapshot_id:
             raise KnowledgeCompileError("知识提案引用了当前来源之外的证据。", "KNOWLEDGE_CITATION_INVALID")
@@ -306,6 +316,24 @@ def _save_pending_proposal(
     return {"proposal_id": proposal_id, "status": "pending", "path": relative_to_knowledge(path)}
 
 
+def _commit_relation_operation(operation: ProposalOperation, source_id: str) -> dict[str, Any]:
+    note = get_note(str(operation.target_note_id))
+    if not note:
+        raise KnowledgeCompileError("关系提案的目标条目不存在。", "KNOWLEDGE_NOTE_NOT_FOUND")
+    existing = [
+        {"relation_type": item["relation_type"], "target_note_id": item["to_note_id"], "confidence": item.get("confidence") or 1.0}
+        for item in note.get("relations", [])
+    ]
+    additions = [item.model_dump() for item in operation.relations]
+    merged = {(item["relation_type"], item["target_note_id"]): item for item in [*existing, *additions]}
+    replace_note_relations(str(note["id"]), list(merged.values()), source_id)
+    if operation.operation == "mark_conflict":
+        from backend.app.db.connection import connect
+        with connect() as connection:
+            connection.execute("UPDATE knowledge_notes SET status='stale', updated_at=? WHERE id=?", (now_iso(), note["id"]))
+    return {"note_id": note["id"], "title": note["title"], "status": "committed", "operation": operation.operation}
+
+
 async def compile_source(source_id: str) -> dict[str, Any]:
     source = get_source(source_id)
     if not source:
@@ -324,11 +352,14 @@ async def compile_source(source_id: str) -> dict[str, Any]:
 
     job_id = create_job("compile", source_id, {"snapshot_id": snapshot["id"]})
     update_job(job_id, status="running")
+    fallback_used = False
     try:
         proposal = await _model_proposal(source, snapshot, chunks)
     except Exception:
+        logger.exception("Knowledge model compilation failed; using deterministic fallback", extra={"source_id": source_id})
         proposal = None
     if proposal is None or not proposal.operations:
+        fallback_used = True
         proposal = CompilationProposal(
             source_id=source_id,
             operations=[_fallback_operation(source, snapshot, chunks)],
@@ -357,8 +388,10 @@ async def compile_source(source_id: str) -> dict[str, Any]:
                 pending.append(
                     _save_pending_proposal(job_id, operation, source_id, str(snapshot["id"]))
                 )
+            else:
+                pending.append(_save_pending_proposal(job_id, operation, source_id, str(snapshot["id"])))
         status = "proposed" if pending else "committed"
-        result = {"job_id": job_id, "source_id": source_id, "committed": committed, "pending": pending}
+        result = {"job_id": job_id, "source_id": source_id, "committed": committed, "pending": pending, "fallback_used": fallback_used}
         update_job(job_id, status=status, result=result)
         if not pending:
             update_source(source_id, status="active")
@@ -380,11 +413,17 @@ def review_proposal(proposal_id: str, decision: str) -> dict[str, Any]:
     if proposal["status"] != "pending":
         raise KnowledgeCompileError("知识提案已经处理。", "KNOWLEDGE_PROPOSAL_RESOLVED")
     source_path = from_knowledge_relative(str(proposal["proposal_path"]))
-    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    try:
+        proposal_content = source_path.read_text(encoding="utf-8")
+        payload = json.loads(proposal_content)
+    except FileNotFoundError as exc:
+        raise KnowledgeCompileError("知识提案文件已丢失，请重新编译来源。", "KNOWLEDGE_PROPOSAL_FILE_NOT_FOUND") from exc
+    except (json.JSONDecodeError, OSError) as exc:
+        raise KnowledgeCompileError("知识提案文件无法读取。", "KNOWLEDGE_PROPOSAL_FILE_INVALID") from exc
     payload_source_id = str(payload["source_id"])
     if decision == "reject":
         target = knowledge_root() / "proposals" / "rejected" / source_path.name
-        atomic_write(target, source_path.read_text(encoding="utf-8"))
+        atomic_write(target, proposal_content)
         source_path.unlink(missing_ok=True)
         resolve_proposal(proposal_id, "rejected")
         if not source_has_pending_proposals(str(payload_source_id)):
@@ -398,7 +437,7 @@ def review_proposal(proposal_id: str, decision: str) -> dict[str, Any]:
     snapshot = get_snapshot(str(payload["snapshot_id"]))
     if not source or not snapshot:
         raise KnowledgeCompileError("提案关联的来源已不存在。", "KNOWLEDGE_SOURCE_NOT_FOUND")
-    result = _commit_note(operation, source, snapshot)
+    result = (_commit_note(operation, source, snapshot) if operation.operation in {"create_note", "update_note"} else _commit_relation_operation(operation, str(source["id"])))
     resolve_proposal(proposal_id, "accepted")
     source_path.unlink(missing_ok=True)
     if not source_has_pending_proposals(str(source["id"])):

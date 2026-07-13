@@ -3,6 +3,7 @@ import { FloatingBallView } from "./views/FloatingBall";
 import { ContextMenuView } from "./views/ContextMenu";
 import { OverlayView } from "./views/Overlay";
 import { SettingsView } from "./views/Settings";
+import { KnowledgeWorkspaceView } from "./views/KnowledgeWorkspace";
 
 export function App() {
   const view = useWindowView();
@@ -17,6 +18,10 @@ export function App() {
 
   if (view === "settings") {
     return <SettingsView />;
+  }
+
+  if (view === "knowledge") {
+    return <KnowledgeWorkspaceView />;
   }
 
   return <OverlayView />;

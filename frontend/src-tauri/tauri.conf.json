@@ -28,7 +28,7 @@
         "label": "context-menu",
         "title": "DeskPilot Menu",
         "width": 188,
-        "height": 178,
+        "height": 216,
         "alwaysOnTop": true,
         "resizable": false,
         "decorations": false,
@@ -57,6 +57,19 @@
         "height": 600,
         "alwaysOnTop": false,
         "resizable": false,
+        "decorations": false,
+        "transparent": false,
+        "visible": false
+      },
+      {
+        "label": "knowledge",
+        "title": "DeskPilot 知识库",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 980,
+        "minHeight": 640,
+        "alwaysOnTop": false,
+        "resizable": true,
         "decorations": false,
         "transparent": false,
         "visible": false

@@ -205,7 +205,7 @@ ingest_text = ToolDefinition(
 
 ingest_file_tool = ToolDefinition(
     name="knowledge.ingest_file",
-    description="将用户明确指定的本地 Markdown 或 TXT 文件导入知识库",
+    description="将用户明确指定的本地 Markdown、TXT、PDF、DOCX 或图片文件导入知识库",
     input_schema={
         "type": "object",
         "properties": {

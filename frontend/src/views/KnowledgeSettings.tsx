@@ -5,7 +5,9 @@ import {
   CheckCircle2,
   Database,
   FileCheck2,
+  FileClock,
   FolderOpen,
+  Network,
   Globe2,
   LoaderCircle,
   RefreshCw,
@@ -17,6 +19,7 @@ import {
 } from "lucide-react";
 import {
   getKnowledgeSettings,
+  exportObsidianVault,
   getKnowledgeStatus,
   getKnowledgeProposals,
   ingestCurrentPage,
@@ -27,7 +30,7 @@ import {
 } from "../api/client";
 import type { KnowledgeProposal, KnowledgeSettings, KnowledgeStatus } from "../types/api";
 
-type ActionState = "idle" | "saving" | "ingesting" | "linting" | "rebuilding" | "reviewing";
+type ActionState = "idle" | "saving" | "ingesting" | "linting" | "rebuilding" | "reviewing" | "exporting";
 
 const defaultSettings: KnowledgeSettings = {
   enabled: true,
@@ -36,8 +39,14 @@ const defaultSettings: KnowledgeSettings = {
   allow_private_remote: false,
   max_search_results: 8,
   auto_create_notes: true,
+  web_update_enabled: false,
+  web_update_interval_minutes: 1440,
+  auto_watch_web_sources: false,
+  obsidian_enabled: false,
+  obsidian_include_sources: true,
   purpose: "",
-  root_path: ""
+  root_path: "",
+  active_profile_id: "profile_default"
 };
 
 export function KnowledgeSettingsPanel() {
@@ -182,6 +191,18 @@ export function KnowledgeSettingsPanel() {
 
       <section className="knowledge-setting-section">
         <div className="knowledge-section-heading">
+          <Network size={18} />
+          <div><strong>Obsidian</strong><span>为当前 Profile 生成可独立浏览的 Vault</span></div>
+        </div>
+        <SettingToggle label="启用 Obsidian 集成" detail="DeskPilot 仍是知识正文的事实来源" checked={settings.obsidian_enabled} onChange={(value) => setValue("obsidian_enabled", value)} />
+        <SettingToggle label="导出来源快照" detail="在 Vault 的 Sources 目录保留当前来源版本" checked={settings.obsidian_include_sources} onChange={(value) => setValue("obsidian_include_sources", value)} />
+        <div className="knowledge-maintenance-actions">
+          <button disabled={busy || !settings.obsidian_enabled} onClick={() => void runAction("exporting", exportObsidianVault, "Obsidian Vault 已更新")}>{action === "exporting" ? <LoaderCircle className="is-spinning" size={16} /> : <Network size={16} />}导出 Vault</button>
+        </div>
+      </section>
+
+      <section className="knowledge-setting-section">
+        <div className="knowledge-section-heading">
           <Workflow size={18} />
           <div><strong>编译流程</strong><span>控制来源进入知识库后的处理方式</span></div>
         </div>
@@ -231,6 +252,31 @@ export function KnowledgeSettingsPanel() {
           checked={settings.allow_private_remote}
           onChange={(value) => setValue("allow_private_remote", value)}
         />
+      </section>
+
+      <section className="knowledge-setting-section knowledge-grid-section">
+        <div className="knowledge-section-heading">
+          <FileClock size={18} />
+          <div><strong>网页更新监控</strong><span>按当前 Profile 定期检查已收录网页</span></div>
+        </div>
+        <SettingToggle
+          label="启用定时检查"
+          detail="后台仅检查已明确关注的网页来源"
+          checked={settings.web_update_enabled}
+          onChange={(value) => setValue("web_update_enabled", value)}
+        />
+        <SettingToggle
+          label="自动关注新网页"
+          detail="以后收录的网页自动加入更新检查"
+          checked={settings.auto_watch_web_sources}
+          onChange={(value) => setValue("auto_watch_web_sources", value)}
+        />
+        <label className="knowledge-select-row">
+          <span><strong>默认检查间隔</strong><small>单个来源可在知识库工作区单独启用</small></span>
+          <select value={settings.web_update_interval_minutes} onChange={(event) => setValue("web_update_interval_minutes", Number(event.target.value))}>
+            <option value={60}>每小时</option><option value={360}>每 6 小时</option><option value={1440}>每天</option><option value={10080}>每周</option>
+          </select>
+        </label>
       </section>
 
       <section className="knowledge-setting-section">

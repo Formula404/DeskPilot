@@ -97,6 +97,16 @@ class KnowledgeSettings(BaseModel):
     allow_private_remote: bool = False
     max_search_results: int = Field(default=8, ge=3, le=30)
     auto_create_notes: bool = True
+    web_update_enabled: bool = False
+    web_update_interval_minutes: int = Field(default=1440, ge=15, le=43200)
+    auto_watch_web_sources: bool = False
+    obsidian_enabled: bool = False
+    obsidian_include_sources: bool = True
+
+
+class KnowledgeProfileCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=500)
 
 
 class KnowledgeQueryRequest(BaseModel):

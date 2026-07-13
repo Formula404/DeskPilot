@@ -1,5 +1,5 @@
 import { MouseEvent as ReactMouseEvent, useCallback, useRef } from "react";
-import { History, Power, Settings, User } from "lucide-react";
+import { BookOpen, History, Power, Settings, User } from "lucide-react";
 import { gsap, useGSAP } from "../motion/register";
 import { getMotionDuration, motion } from "../motion/constants";
 import { useReducedMotion } from "../motion/useReducedMotion";
@@ -100,6 +100,11 @@ export function ContextMenuView() {
     await closeMenuWithMotion();
   }
 
+  async function openKnowledge() {
+    afterCloseRef.current = () => showWindow("knowledge");
+    await closeMenuWithMotion();
+  }
+
   function animateMenuItem(event: ReactMouseEvent<HTMLButtonElement>, hovered: boolean) {
     const icon = event.currentTarget.querySelector("svg");
     const label = event.currentTarget.querySelector("span");
@@ -122,6 +127,16 @@ export function ContextMenuView() {
         >
           <Settings size={17} />
           <span>设置</span>
+        </button>
+        <button
+          className="orb-menu-item"
+          data-motion="orb-menu-item"
+          onClick={openKnowledge}
+          onPointerEnter={(event) => animateMenuItem(event, true)}
+          onPointerLeave={(event) => animateMenuItem(event, false)}
+        >
+          <BookOpen size={17} />
+          <span>知识库</span>
         </button>
         <button
           className="orb-menu-item"
