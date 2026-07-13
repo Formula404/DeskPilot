@@ -42,6 +42,17 @@ def register_default_tools() -> None:
     from backend.app.tools.browser.summarize import summarize_current_page
     from backend.app.tools.file.write_markdown import write_markdown
     from backend.app.tools.file.write_xlsx import write_xlsx
+    from backend.app.tools.knowledge.operations import (
+        answer,
+        compile_source_tool,
+        ingest_current_page,
+        ingest_file_tool,
+        ingest_text,
+        lint,
+        rebuild,
+        review,
+        search,
+    )
 
     for tool in [
         collect_current_page,
@@ -51,6 +62,15 @@ def register_default_tools() -> None:
         summarize_current_page,
         write_markdown,
         write_xlsx,
+        ingest_current_page,
+        ingest_file_tool,
+        ingest_text,
+        search,
+        answer,
+        compile_source_tool,
+        review,
+        lint,
+        rebuild,
     ]:
         tool_registry.register(tool)
 

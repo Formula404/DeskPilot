@@ -8,18 +8,21 @@ from backend.app.api.routes_browser import router as browser_router
 from backend.app.api.routes_chat import router as chat_router
 from backend.app.api.routes_context import router as context_router
 from backend.app.api.routes_events import router as events_router
+from backend.app.api.routes_knowledge import router as knowledge_router
 from backend.app.api.routes_settings import router as settings_router
 from backend.app.api.routes_tools import router as tools_router
 from backend.app.core.config import get_settings
 from backend.app.core.logging import configure_logging
 from backend.app.core.paths import ensure_data_dirs
 from backend.app.db.connection import init_db
+from backend.app.knowledge.paths import ensure_knowledge_dirs
 
 
 def create_app() -> FastAPI:
     configure_logging()
     ensure_data_dirs()
     init_db()
+    ensure_knowledge_dirs()
 
     settings = get_settings()
     app = FastAPI(title="DeskPilot API", version="0.1.0")
@@ -39,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(browser_router)
     app.include_router(context_router)
     app.include_router(events_router)
+    app.include_router(knowledge_router)
     app.include_router(settings_router)
     app.include_router(tools_router)
     return app

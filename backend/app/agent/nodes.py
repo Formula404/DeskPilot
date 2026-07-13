@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from openai import AsyncOpenAI
 
 from backend.app.agent.intents import detect_intent
@@ -11,6 +13,8 @@ from backend.app.agent.tool_calling import (
 )
 from backend.app.core.config import get_settings
 from backend.app.db.repository import add_task_step, update_task
+from backend.app.schemas.common import ToolResult
+from backend.app.tools.registry import tool_registry
 
 
 def _next_step_index(state: AgentState) -> int:
@@ -76,6 +80,152 @@ async def export_current_page_table(state: AgentState) -> AgentState:
         return {**state, "error": str(exc)}
 
     return {**state, **result}
+
+
+async def _run_knowledge_tool(
+    state: AgentState,
+    tool_name: str,
+    payload: dict,
+) -> tuple[AgentState, ToolResult]:
+    step_index = _next_step_index(state)
+    result = await tool_registry.call(tool_name, payload)
+    output = {
+        "ok": result.ok,
+        "message": result.message,
+        "data": result.data,
+        "error": result.error.model_dump() if result.error else None,
+    }
+    add_task_step(
+        state["task_id"],
+        step_index=step_index,
+        step_type="tool",
+        name=tool_name.replace(".", "_"),
+        status="completed" if result.ok else "failed",
+        input_data=payload,
+        output_data=output,
+    )
+    await _publish_step(
+        state,
+        {
+            "step_index": step_index,
+            "type": "tool",
+            "name": tool_name.replace(".", "_"),
+            "status": "completed" if result.ok else "failed",
+            "input": payload,
+            "output": output,
+        },
+    )
+    return {**state, "step_count": step_index}, result
+
+
+async def ingest_knowledge(state: AgentState) -> AgentState:
+    path_match = re.search(r"[\"']([^\"']+\.(?:md|txt))[\"']", state["user_input"], re.IGNORECASE)
+    if not path_match:
+        path_match = re.search(r"([A-Za-z]:[\\/][^\n]+?\.(?:md|txt))", state["user_input"], re.IGNORECASE)
+    tool_name = "knowledge.ingest_file" if path_match else "knowledge.ingest_current_page"
+    payload = {"path": path_match.group(1).strip()} if path_match else {}
+    next_state, result = await _run_knowledge_tool(state, tool_name, payload)
+    if not result.ok:
+        return {**next_state, "error": result.message}
+    data = result.data or {}
+    compilation = data.get("compilation") or {}
+    committed = compilation.get("committed") or []
+    pending = compilation.get("pending") or []
+    response = f"已将《{data.get('title') or '当前来源'}》加入知识库。"
+    if data.get("status") == "already_exists":
+        response = f"《{data.get('title') or '当前网页'}》已在知识库中，没有重复保存。"
+    elif committed:
+        response += f" 已生成 {len(committed)} 条知识条目。"
+    if pending:
+        response += f" 有 {len(pending)} 项更新等待审核。"
+    return {
+        **next_state,
+        "final_response": response,
+        "artifacts": [artifact.model_dump() for artifact in result.artifacts],
+        "knowledge_refs": committed,
+        "knowledge_job_id": compilation.get("job_id"),
+        "proposal_ids": [item["proposal_id"] for item in pending],
+    }
+
+
+def _knowledge_query_text(message: str) -> str:
+    cleaned = re.sub(
+        r"^(请|帮我|麻烦)?\s*(在|从|用|根据)?\s*(我的)?\s*(知识库(?:里|中)?|资料里?)\s*(查一下|查询|搜索|回答)?[：:，,\s]*",
+        "",
+        message.strip(),
+    )
+    return cleaned or message.strip()
+
+
+async def query_knowledge(state: AgentState) -> AgentState:
+    query = _knowledge_query_text(state["user_input"])
+    next_state, result = await _run_knowledge_tool(state, "knowledge.answer", {"query": query})
+    if not result.ok:
+        return {**next_state, "error": result.message}
+    data = result.data or {}
+    return {
+        **next_state,
+        "final_response": str(data.get("answer") or "知识库中没有足够材料。"),
+        "knowledge_refs": data.get("results") or [],
+        "retrieval_trace": {
+            "query": query,
+            "result_ids": [item.get("id") for item in data.get("results") or []],
+            "model_used": data.get("model_used", False),
+        },
+    }
+
+
+async def maintain_knowledge(state: AgentState) -> AgentState:
+    message = state["user_input"]
+    mentions_rebuild = "重建" in message
+    asks_for_check = any(keyword in message for keyword in ["检查", "是否", "需不需要", "需要", "建议"])
+    rebuild = mentions_rebuild and "确认" in message
+    if mentions_rebuild and not asks_for_check and not rebuild:
+        return {
+            **state,
+            "final_response": "重建索引会先备份数据库并重写派生索引。请明确回复“确认重建知识索引”后再执行。",
+        }
+    tool_name = "knowledge.rebuild_index" if rebuild else "knowledge.lint"
+    next_state, result = await _run_knowledge_tool(state, tool_name, {})
+    if not result.ok:
+        return {**next_state, "error": result.message}
+    data = result.data or {}
+    if rebuild:
+        response = f"知识索引已重建：{data.get('notes', 0)} 条知识、{data.get('sources', 0)} 个来源。"
+    else:
+        summary = data.get("summary") or {}
+        response = (
+            f"知识库检查完成：{summary.get('errors', 0)} 个错误，"
+            f"{summary.get('warnings', 0)} 个警告。"
+        )
+    return {**next_state, "final_response": response}
+
+
+async def review_knowledge(state: AgentState) -> AgentState:
+    match = re.search(r"prop_[a-fA-F0-9]+", state["user_input"])
+    if not match:
+        return {**state, "final_response": "请提供要处理的知识提案 ID。"}
+    message = state["user_input"]
+    accept_requested = any(keyword in message for keyword in ["接受", "同意", "批准", "应用提案"])
+    reject_requested = any(keyword in message for keyword in ["拒绝", "驳回"])
+    if accept_requested == reject_requested:
+        return {
+            **state,
+            "final_response": (
+                f"提案 {match.group(0)} 尚未处理。"
+                "请明确回复“接受提案 ID”或“拒绝提案 ID”。"
+            ),
+        }
+    decision = "accept" if accept_requested else "reject"
+    next_state, result = await _run_knowledge_tool(
+        state,
+        "knowledge.review_proposal",
+        {"proposal_id": match.group(0), "decision": decision},
+    )
+    if not result.ok:
+        return {**next_state, "error": result.message}
+    action = "接受" if decision == "accept" else "拒绝"
+    return {**next_state, "final_response": f"已{action}知识提案 {match.group(0)}。"}
 
 
 async def general_chat(state: AgentState) -> AgentState:

@@ -1,12 +1,13 @@
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Window } from "@tauri-apps/api/window";
-import { Bot, Clock3, Copy, Info, Keyboard, PanelRight, Settings, ShieldCheck, User, X } from "lucide-react";
+import { BookOpen, Bot, Clock3, Copy, Info, Keyboard, PanelRight, Settings, ShieldCheck, User, X } from "lucide-react";
 import deskpilotLogo from "../assets/deskpilot-logo.png";
 import { gsap, useGSAP } from "../motion/register";
 import { getMotionDuration, motion } from "../motion/constants";
 import { useReducedMotion } from "../motion/useReducedMotion";
 import { useWindowLifecycle } from "../hooks/useWindowLifecycle";
 import { hideCurrentWindow, isTauriRuntime } from "./windowActions";
+import { KnowledgeSettingsPanel } from "./KnowledgeSettings";
 
 const settingsNav = [
   { label: "账号", icon: User },
@@ -15,6 +16,7 @@ const settingsNav = [
   { label: "快捷键", icon: Keyboard },
   { label: "上下文权限", icon: ShieldCheck },
   { label: "AI 设置", icon: Bot },
+  { label: "知识库", icon: BookOpen },
   { label: "关于", icon: Info }
 ];
 export function SettingsView() {
@@ -247,8 +249,8 @@ export function SettingsView() {
 
         <div className="settings-card" data-motion="settings-card" data-no-window-drag>
           <div data-motion="settings-card-body">
-            <h1 data-motion="settings-page-item">{displayedActive}</h1>
-            {displayedActive === "账号" ? <AccountSettings /> : <GenericSettings active={displayedActive} />}
+            <h1>{displayedActive}</h1>
+            {displayedActive === "账号" ? <AccountSettings /> : displayedActive === "知识库" ? <KnowledgeSettingsPanel /> : <GenericSettings active={displayedActive} />}
           </div>
         </div>
       </section>

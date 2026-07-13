@@ -18,6 +18,7 @@ def ensure_data_dirs() -> None:
     for relative in [
         "config",
         "exports",
+        "knowledge",
         "logs",
         "screenshots",
         "tasks",

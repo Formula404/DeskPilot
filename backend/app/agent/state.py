@@ -15,4 +15,8 @@ class AgentState(TypedDict, total=False):
     final_response: str
     artifacts: list[dict[str, str]]
     error: str | None
+    knowledge_refs: list[dict[str, Any]]
+    knowledge_job_id: str | None
+    proposal_ids: list[str]
+    retrieval_trace: dict[str, Any]
     publish_step: Callable[[dict[str, Any]], Awaitable[None]]

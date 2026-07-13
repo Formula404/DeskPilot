@@ -18,6 +18,15 @@ def test_default_tools_registered() -> None:
     assert "browser.export_structured_blocks_to_xlsx" in names
     assert "file.write_markdown" in names
     assert "file.write_xlsx" in names
+    assert "knowledge.ingest_current_page" in names
+    assert "knowledge.ingest_text" in names
+    assert "knowledge.ingest_file" in names
+    assert "knowledge.search" in names
+    assert "knowledge.answer" in names
+    assert "knowledge.compile_source" in names
+    assert "knowledge.review_proposal" in names
+    assert "knowledge.lint" in names
+    assert "knowledge.rebuild_index" in names
 
 
 def test_openai_tool_mapping() -> None:

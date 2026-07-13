@@ -9,6 +9,10 @@ from backend.app.agent.nodes import (
     export_current_page_table,
     finalize,
     general_chat,
+    ingest_knowledge,
+    maintain_knowledge,
+    query_knowledge,
+    review_knowledge,
     route_intent,
     summarize_current_page,
 )
@@ -20,6 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 def _route_after_intent(state: AgentState) -> str:
+    if state.get("intent") == "knowledge_ingest":
+        return "ingest_knowledge"
+    if state.get("intent") == "knowledge_query":
+        return "query_knowledge"
+    if state.get("intent") == "knowledge_maintenance":
+        return "maintain_knowledge"
+    if state.get("intent") == "knowledge_review":
+        return "review_knowledge"
     if state.get("intent") == "web_page_summary":
         return "summarize_current_page"
     if state.get("intent") == "web_table_export":
@@ -33,6 +45,10 @@ def build_graph():
     graph.add_node("summarize_current_page", summarize_current_page)
     graph.add_node("export_current_page_table", export_current_page_table)
     graph.add_node("general_chat", general_chat)
+    graph.add_node("ingest_knowledge", ingest_knowledge)
+    graph.add_node("query_knowledge", query_knowledge)
+    graph.add_node("maintain_knowledge", maintain_knowledge)
+    graph.add_node("review_knowledge", review_knowledge)
     graph.add_node("finalize", finalize)
     graph.set_entry_point("route_intent")
     graph.add_conditional_edges(
@@ -42,11 +58,19 @@ def build_graph():
             "summarize_current_page": "summarize_current_page",
             "export_current_page_table": "export_current_page_table",
             "general_chat": "general_chat",
+            "ingest_knowledge": "ingest_knowledge",
+            "query_knowledge": "query_knowledge",
+            "maintain_knowledge": "maintain_knowledge",
+            "review_knowledge": "review_knowledge",
         },
     )
     graph.add_edge("summarize_current_page", "finalize")
     graph.add_edge("export_current_page_table", "finalize")
     graph.add_edge("general_chat", "finalize")
+    graph.add_edge("ingest_knowledge", "finalize")
+    graph.add_edge("query_knowledge", "finalize")
+    graph.add_edge("maintain_knowledge", "finalize")
+    graph.add_edge("review_knowledge", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile()
 

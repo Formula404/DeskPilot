@@ -8,6 +8,10 @@ export function useWindowView(): WindowView {
 
   useEffect(() => {
     if (!isTauriRuntime()) {
+      const preview = new URLSearchParams(window.location.search).get("view") as WindowView | null;
+      if (preview === "floating-ball" || preview === "overlay" || preview === "settings" || preview === "context-menu") {
+        setView(preview);
+      }
       return;
     }
     try {

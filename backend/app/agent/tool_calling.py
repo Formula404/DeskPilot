@@ -24,6 +24,11 @@ WEB_TABLE_EXPORT_TOOLS = [
     "browser.export_structured_blocks_to_xlsx",
 ]
 
+KNOWLEDGE_INGEST_TOOLS = ["knowledge.ingest_current_page", "knowledge.ingest_file", "knowledge.compile_source"]
+KNOWLEDGE_QUERY_TOOLS = ["knowledge.search", "knowledge.answer"]
+KNOWLEDGE_MAINTENANCE_TOOLS = ["knowledge.lint", "knowledge.rebuild_index"]
+KNOWLEDGE_REVIEW_TOOLS = ["knowledge.review_proposal"]
+
 
 class ToolCallingError(RuntimeError):
     pass

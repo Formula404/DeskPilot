@@ -150,3 +150,20 @@ def get_latest_browser_context() -> dict[str, Any] | None:
     data = dict(row)
     data["dom_summary"] = json.loads(data.pop("dom_summary_json") or "[]")
     return data
+
+
+def get_setting(key: str) -> str | None:
+    with connect() as connection:
+        row = connection.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return str(row["value"]) if row else None
+
+
+def set_setting(key: str, value: str) -> None:
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO settings(key, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (key, value, now_iso()),
+        )
