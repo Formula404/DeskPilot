@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from backend.app.browser.bridge import BrowserBridgeError, browser_bridge
 from backend.app.db.repository import now_iso, save_browser_context
 from backend.app.knowledge.backup import backup_database
@@ -31,7 +33,7 @@ async def _ingest_current_page(payload: dict) -> ToolResult:
         url = page.get("url")
         if not isinstance(url, str) or not url:
             raise KnowledgeIngestError("浏览器扩展未返回有效 URL。", "KNOWLEDGE_INVALID_URL")
-        text = str(page.get("visible_text") or "")
+        text = str(page.get("content_text") or page.get("visible_text") or "")
         context_id = save_browser_context(
             tab_id=str(page.get("tab_id")) if page.get("tab_id") is not None else None,
             url=url,
@@ -49,7 +51,7 @@ async def _ingest_current_page(payload: dict) -> ToolResult:
             capture_method="browser_extension",
             captured_at=page.get("captured_at") or now_iso(),
             browser_context_id=context_id,
-            metadata={"tab_id": page.get("tab_id"), "dom_summary": page.get("dom_summary") or []},
+            metadata={"tab_id": page.get("tab_id"), "dom_summary": page.get("dom_summary") or [], "page_metadata": page.get("metadata") or {}, "extraction_method": page.get("extraction_method"), "content_quality": page.get("content_quality"), "headings": page.get("headings") or [], "json_ld": page.get("json_ld") or []},
         )
         should_compile = payload.get("compile")
         if should_compile is None:
@@ -145,7 +147,11 @@ async def _compile(payload: dict) -> ToolResult:
 
 async def _review(payload: dict) -> ToolResult:
     try:
-        result = review_proposal(str(payload.get("proposal_id") or ""), str(payload.get("decision") or ""))
+        result = review_proposal(
+            str(payload.get("proposal_id") or ""),
+            str(payload.get("decision") or ""),
+            force=bool(payload.get("force", False)),
+        )
         return ToolResult(ok=True, data=result, message="知识提案已处理")
     except KnowledgeCompileError as exc:
         return _failure(exc, "KNOWLEDGE_REVIEW_FAILED")
@@ -162,8 +168,8 @@ async def _semantic_lint(_: dict) -> ToolResult:
 
 
 async def _rebuild(_: dict) -> ToolResult:
-    backup = backup_database()
-    result = rebuild_index()
+    backup = await asyncio.to_thread(backup_database)
+    result = await asyncio.to_thread(rebuild_index)
     return ToolResult(
         ok=result["errors"] == 0,
         data={"backup_path": str(backup), **result},
@@ -271,6 +277,7 @@ review = ToolDefinition(
         "properties": {
             "proposal_id": {"type": "string"},
             "decision": {"type": "string", "enum": ["accept", "reject"]},
+            "force": {"type": "boolean", "description": "基准哈希冲突时明确覆盖当前页面；仅在用户确认后使用"},
         },
         "required": ["proposal_id", "decision"],
         "additionalProperties": False,

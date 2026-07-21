@@ -42,6 +42,9 @@ $RECYCLE.BIN/
 .pytest_cache/
 .tox/
 coverage/
+frontend/test-results/
+frontend/playwright-report/
+report/
 
 # Python type checking
 .mypy_cache/

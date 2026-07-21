@@ -176,4 +176,36 @@ export interface KnowledgeProposalDetail extends KnowledgeProposal {
     };
   } | null;
   target_note: KnowledgeNoteDetail | null;
+  diff: {
+    fields: Array<{ field: string; before: unknown; after: unknown; changed: boolean }>;
+    unified_diff: string[];
+    evidence: { added: string[][]; removed: string[][] };
+    relations: { added: string[][]; removed: string[][] };
+    base: { expected_note_sha256: string | null; current_note_sha256: string | null; matches: boolean; snapshot_id: string | null };
+    changed_fields: string[];
+  };
+}
+
+export type KnowledgeQueryMode = "answer" | "compare" | "timeline" | "explore";
+
+export interface KnowledgeQueryResult {
+  mode?: KnowledgeQueryMode;
+  answer: string;
+  results: KnowledgeNoteSummary[];
+  reading_level: string;
+  comparison?: Record<string, unknown>;
+  timeline?: Array<Record<string, unknown>>;
+  graph?: Record<string, unknown>;
+}
+
+export interface KnowledgeJob {
+  id: string;
+  job_type: string;
+  target_id: string | null;
+  status: string;
+  progress: number;
+  attempt_count: number;
+  max_attempts: number;
+  error_code: string | null;
+  error_message: string | null;
 }

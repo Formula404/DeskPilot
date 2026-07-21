@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +11,7 @@ from fastapi.testclient import TestClient
 from backend.app.agent import nodes
 from backend.app.agent.intents import detect_intent
 from backend.app.core.config import get_settings
+from backend.app.core.paths import db_path
 from backend.app.db.connection import init_db
 from backend.app.db.connection import connect
 from backend.app.db.repository import set_setting
@@ -20,19 +23,34 @@ from backend.app.knowledge.markdown import parse_markdown_document, source_chunk
 from backend.app.knowledge.chinese_search import search_terms
 from backend.app.knowledge.obsidian import export_obsidian_vault
 from backend.app.knowledge.paths import KNOWLEDGE_ROOT_KEY, ensure_knowledge_dirs, from_knowledge_relative
-from backend.app.knowledge.profiles import create_profile, switch_profile
-from backend.app.knowledge.repository import get_note, get_proposal, get_source, list_proposals
+from backend.app.knowledge.profiles import create_profile, list_profiles, switch_profile
+from backend.app.knowledge.repository import (
+    create_job,
+    get_note,
+    get_proposal,
+    get_snapshot,
+    get_source,
+    list_proposals,
+    recover_interrupted_jobs,
+    update_job,
+)
 from backend.app.knowledge.retrieval import answer_knowledge, search_knowledge
 from backend.app.knowledge.settings import get_knowledge_settings, save_knowledge_settings
 from backend.app.knowledge.source_service import canonicalize_url, ingest_content, ingest_file
 from backend.app.knowledge.storage import change_storage_directory
 from backend.app.knowledge.paths import knowledge_root
 from backend.app.knowledge.catalog import catalog_status, refresh_catalogs
-from backend.app.knowledge.lint import semantic_lint_knowledge
+from backend.app.knowledge.lint import apply_semantic_lint_fix, semantic_lint_knowledge
 from backend.app.knowledge.compiler import promote_answer
 from backend.app.knowledge.web_monitor import check_web_source, get_watch, set_watch
+from backend.app.knowledge.backup import create_full_backup, inspect_backup, restore_full_backup
+from backend.app.knowledge.lifecycle import list_trash, restore_source, trash_source
+from backend.app.knowledge.jobs import knowledge_job_manager
+from backend.app.knowledge.repository import get_job, list_job_events
+from backend.app.knowledge.document_parser import parse_document
 from backend.app.main import app
 from backend.app.schemas.common import ToolResult
+from backend.app.tools.knowledge import operations as knowledge_operations
 
 
 @pytest.fixture
@@ -261,15 +279,213 @@ async def test_source_update_creates_review_proposal(knowledge_data_dir, monkeyp
     assert proposal_detail.status_code == 200
     assert proposal_detail.json()["payload"]["operation"]["operation"] == "update_note"
     assert proposal_detail.json()["target_note"]["id"] == note_id
+    assert proposal_detail.json()["diff"]["base"]["matches"] is True
+    assert "details" in proposal_detail.json()["diff"]["changed_fields"]
+    assert proposal_detail.json()["diff"]["unified_diff"]
     edit_response = TestClient(app).put(f"/knowledge/notes/{note_id}", json={"title": "Versioned Source", "entity_type": "note", "summary": "Manually protected old summary", "overview": "Old overview", "details": "Old details", "tags": []})
     assert edit_response.status_code == 200
-    resolution = review_proposal(proposal_id, "accept")
+    assert TestClient(app).get(f"/knowledge/proposals/{proposal_id}").json()["diff"]["base"]["matches"] is False
+    with pytest.raises(KnowledgeCompileError) as conflict:
+        review_proposal(proposal_id, "accept")
+    assert conflict.value.code == "KNOWLEDGE_PROPOSAL_BASE_MISMATCH"
+    review_proposal(proposal_id, "reject")
+    replacement = await compile_source(first["source_id"])
+    resolution = review_proposal(replacement["pending"][0]["proposal_id"], "accept")
     assert resolution["status"] == "accepted"
     assert get_note(note_id)["status"] == "active"
     accepted_detail = TestClient(app).get(f"/knowledge/notes/{note_id}").json()
     assert accepted_detail["sections"]["Summary"] == "Manually protected old summary"
     assert accepted_detail["sections"]["Overview"] == "Old overview"
     assert accepted_detail["sections"]["Details"] == "Old details"
+
+
+@pytest.mark.asyncio
+async def test_stale_proposal_can_only_be_force_accepted_explicitly(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(compiler, "get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"))
+    source = ingest_content(source_type="web", title="Force Review", content="Original source content for an explicit force review test.", canonical_uri="https://example.com/force-review", capture_method="test")
+    note_id = (await compile_source(source["source_id"]))["committed"][0]["note_id"]
+    ingest_content(source_type="web", title="Force Review", content="Updated source content that creates a pending proposal for review.", canonical_uri="https://example.com/force-review", capture_method="test")
+    proposal_id = (await compile_source(source["source_id"]))["pending"][0]["proposal_id"]
+    response = TestClient(app).put(f"/knowledge/notes/{note_id}", json={"title": "Manual edit", "entity_type": "note", "summary": "Manual", "overview": "Manual", "details": "Manual", "tags": ["manual"]})
+    assert response.status_code == 200
+
+    blocked = TestClient(app).post(f"/knowledge/proposals/{proposal_id}/resolve", json={"decision": "accept"})
+    assert blocked.status_code == 400
+    assert blocked.json()["detail"]["code"] == "KNOWLEDGE_PROPOSAL_BASE_MISMATCH"
+    forced = TestClient(app).post(f"/knowledge/proposals/{proposal_id}/resolve", json={"decision": "accept", "force": True})
+    assert forced.status_code == 200
+    assert forced.json()["forced"] is True
+    assert get_proposal(proposal_id)["status"] == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_compile_lock_rejects_overlapping_work(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    source = ingest_content(
+        source_type="user",
+        title="Concurrent Compile",
+        content="Content long enough to exercise the cross-process compilation lease.",
+        canonical_uri="user://concurrent-compile",
+        capture_method="test",
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_proposal(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return None
+
+    monkeypatch.setattr(compiler, "_model_proposal", slow_proposal)
+    first = asyncio.create_task(compile_source(source["source_id"]))
+    await entered.wait()
+    with pytest.raises(KnowledgeCompileError) as busy:
+        await compile_source(source["source_id"])
+    assert busy.value.code == "KNOWLEDGE_RESOURCE_BUSY"
+    release.set()
+    assert (await first)["committed"]
+
+
+@pytest.mark.asyncio
+async def test_interrupted_compile_job_is_recovered_and_replayed(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        compiler,
+        "get_settings",
+        lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"),
+    )
+    source = ingest_content(
+        source_type="user",
+        title="Crash Recovery",
+        content="A durable source used to verify replay after an interrupted process.",
+        canonical_uri="user://crash-recovery",
+        capture_method="test",
+    )
+    source_row = get_source(source["source_id"])
+    job_id = create_job(
+        "compile",
+        source["source_id"],
+        {
+            "snapshot_id": source_row["current_snapshot_id"],
+            "profile_id": "profile_default",
+        },
+    )
+    update_job(job_id, status="running")
+
+    recovered = recover_interrupted_jobs()
+    assert recovered["queued"] == 1
+    assert recovered["jobs"][0]["id"] == job_id
+    replayed = await compiler.resume_interrupted_jobs(recovered["jobs"])
+    assert replayed[0]["status"] == "recovered"
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT status, attempt_count FROM knowledge_jobs WHERE id=?", (job_id,)
+        ).fetchone()
+    assert row["status"] == "committed"
+    assert row["attempt_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_background_job_progress_cancel_and_retry(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    entered = asyncio.Event()
+
+    async def slow_execute(job):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(knowledge_job_manager, "_execute", slow_execute)
+    cancelled_job = knowledge_job_manager.enqueue("lint")
+    await entered.wait()
+    assert await knowledge_job_manager.cancel(cancelled_job["id"]) is True
+    for _ in range(50):
+        if get_job(cancelled_job["id"])["status"] == "cancelled":
+            break
+        await asyncio.sleep(0.01)
+    assert get_job(cancelled_job["id"])["status"] == "cancelled"
+    assert [event["event_type"] for event in list_job_events(cancelled_job["id"])][-1] == "cancelled"
+
+    attempts = 0
+
+    async def flaky_execute(job):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("transient failure")
+        return {"ok": True}
+
+    monkeypatch.setattr(knowledge_job_manager, "_execute", flaky_execute)
+    failed_job = knowledge_job_manager.enqueue("lint")
+    for _ in range(50):
+        if get_job(failed_job["id"])["status"] == "failed":
+            break
+        await asyncio.sleep(0.01)
+    assert get_job(failed_job["id"])["status"] == "failed"
+    assert knowledge_job_manager.retry(failed_job["id"]) is True
+    for _ in range(50):
+        if get_job(failed_job["id"])["status"] == "completed":
+            break
+        await asyncio.sleep(0.01)
+    completed = get_job(failed_job["id"])
+    assert completed["status"] == "completed"
+    assert completed["progress"] == 100
+    assert completed["attempt_count"] == 2
+    event_types = [event["event_type"] for event in list_job_events(failed_job["id"])]
+    assert "failed" in event_types and "retried" in event_types and event_types[-1] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_background_compile_job_finishes_as_proposed(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    monkeypatch.setattr(compiler, "get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"))
+    source = ingest_content(source_type="web", title="Duplicate Job", content="First stable version for duplicate job recovery.", canonical_uri="https://example.com/duplicate-job", capture_method="test")
+    await compile_source(source["source_id"])
+    ingest_content(source_type="web", title="Duplicate Job", content="Second version creates a proposal that has not been reviewed yet.", canonical_uri="https://example.com/duplicate-job", capture_method="test")
+    pending = await compile_source(source["source_id"])
+    duplicate = knowledge_job_manager.enqueue("compile", source["source_id"])
+    for _ in range(100):
+        if get_job(duplicate["id"])["status"] != "running" and get_job(duplicate["id"])["status"] != "queued":
+            break
+        await asyncio.sleep(0.01)
+    duplicate_job = get_job(duplicate["id"])
+    assert duplicate_job["status"] == "proposed"
+    assert duplicate_job["result"]["already_pending"] is True
+    assert duplicate_job["result"]["pending"][0]["proposal_id"] == pending["pending"][0]["proposal_id"]
+
+
+@pytest.mark.asyncio
+async def test_rebuild_tool_offloads_blocking_backup_and_index(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    caller_thread = threading.get_ident()
+    worker_threads: list[int] = []
+
+    def fake_backup():
+        worker_threads.append(threading.get_ident())
+        return knowledge_root() / "cache" / "test.sqlite3"
+
+    def fake_rebuild():
+        worker_threads.append(threading.get_ident())
+        return {"errors": 0}
+
+    monkeypatch.setattr(knowledge_operations, "backup_database", fake_backup)
+    monkeypatch.setattr(knowledge_operations, "rebuild_index", fake_rebuild)
+    result = await knowledge_operations._rebuild({})
+    assert result.ok is True
+    assert len(worker_threads) == 2
+    assert all(thread_id != caller_thread for thread_id in worker_threads)
 
 
 @pytest.mark.asyncio
@@ -297,6 +513,101 @@ async def test_note_can_be_edited_and_deleted(knowledge_data_dir, monkeypatch: p
 
 
 @pytest.mark.asyncio
+async def test_archive_trash_and_restore_round_trip(knowledge_data_dir, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(compiler, "get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"))
+    source = ingest_content(source_type="user", title="Lifecycle Note", content="Durable content for archive and trash restoration testing.", canonical_uri="user://lifecycle-note", capture_method="test")
+    compiled = await compile_source(source["source_id"])
+    note_id = compiled["committed"][0]["note_id"]
+    client = TestClient(app)
+
+    archived = client.put(f"/knowledge/notes/{note_id}/archive", json={"archived": True})
+    assert archived.status_code == 200
+    assert get_note(note_id)["status"] == "archived"
+    assert not search_knowledge("Lifecycle Note")
+    assert client.put(f"/knowledge/notes/{note_id}/archive", json={"archived": False}).status_code == 200
+    assert search_knowledge("Lifecycle Note")
+
+    assert client.delete(f"/knowledge/notes/{note_id}").json()["recoverable"] is True
+    assert get_note(note_id) is None
+    assert list_trash()[0]["id"] == note_id
+    restored = client.post(f"/knowledge/trash/note/{note_id}/restore")
+    assert restored.status_code == 200
+    assert get_note(note_id)["status"] == "active"
+    assert search_knowledge("Lifecycle Note")
+
+    trashed_source = trash_source(source["source_id"])
+    assert trashed_source["recoverable"] is True
+    assert get_source(source["source_id"]) is None
+    trash_lint_codes = {item["code"] for item in lint_knowledge()["issues"]}
+    assert "SNAPSHOT_FILE_MISSING" not in trash_lint_codes
+    restore_source(source["source_id"])
+    assert get_source(source["source_id"])["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_full_backup_validates_and_restores_files_and_database(knowledge_data_dir, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(compiler, "get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"))
+    source = ingest_content(source_type="user", title="Backup Baseline", content="Original content that must survive a complete backup and restore.", canonical_uri="user://backup-baseline", capture_method="test")
+    compiled = await compile_source(source["source_id"])
+    note_id = compiled["committed"][0]["note_id"]
+    original_hash = get_note(note_id)["content_sha256"]
+    archive = create_full_backup()
+    assert inspect_backup(archive)["valid"] is True
+
+    response = TestClient(app).put(f"/knowledge/notes/{note_id}", json={"title": "Mutated After Backup", "entity_type": "note", "summary": "Changed", "overview": "Changed", "details": "Changed", "tags": []})
+    assert response.status_code == 200
+    assert get_note(note_id)["content_sha256"] != original_hash
+
+    restored = restore_full_backup(archive)
+    assert restored["restored"] is True
+    restored_note = get_note(note_id)
+    assert restored_note["title"] == "Backup Baseline"
+    assert restored_note["content_sha256"] == original_hash
+    assert from_knowledge_relative(restored_note["markdown_path"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_database_backup_waits_for_concurrent_exclusive_writer(knowledge_data_dir) -> None:
+    import asyncio
+
+    writer = sqlite3.connect(db_path(), timeout=30.0)
+    writer.execute("BEGIN EXCLUSIVE")
+    task = asyncio.create_task(asyncio.to_thread(create_full_backup))
+    await asyncio.sleep(0.1)
+    assert not task.done()
+    writer.commit()
+    writer.close()
+    archive = await asyncio.wait_for(task, timeout=5)
+    assert inspect_backup(archive)["valid"] is True
+
+
+@pytest.mark.asyncio
+async def test_restore_waits_for_live_app_connections_instead_of_replacing_database_file(knowledge_data_dir) -> None:
+    import asyncio
+
+    archive = create_full_backup()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def hold_connection() -> None:
+        with connect() as connection:
+            connection.execute("SELECT 1").fetchone()
+            entered.set()
+            release.wait(timeout=5)
+
+    holder = threading.Thread(target=hold_connection)
+    holder.start()
+    assert entered.wait(timeout=2)
+    restore_task = asyncio.create_task(asyncio.to_thread(restore_full_backup, archive))
+    await asyncio.sleep(0.1)
+    assert not restore_task.done()
+    release.set()
+    restored = await asyncio.wait_for(restore_task, timeout=5)
+    holder.join(timeout=2)
+    assert restored["restored"] is True
+
+
+@pytest.mark.asyncio
 async def test_query_reads_matching_source_excerpt_when_note_omits_detail(knowledge_data_dir, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(compiler, "get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"))
     source = ingest_content(source_type="user", title="Compressed Paper", content="The paper contains the unique term hypergraph-retention-criterion in its detailed methodology.", canonical_uri="user://compressed-paper", capture_method="test")
@@ -308,6 +619,70 @@ async def test_query_reads_matching_source_excerpt_when_note_omits_detail(knowle
     assert answer["results"][0]["id"] == note_id
     excerpts = answer["evidence_bundle"]["notes"][0]["source_excerpts"]
     assert "hypergraph-retention-criterion" in excerpts[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_compare_timeline_and_explore_have_distinct_structured_results(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(compiler, "get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"))
+    alpha = ingest_content(source_type="user", title="Atlas Alpha Method", content="Atlas comparison method Alpha favors fast iteration and explicit evidence.", canonical_uri="user://atlas-alpha", capture_method="test", captured_at="2025-01-01T00:00:00+00:00")
+    beta = ingest_content(source_type="user", title="Atlas Beta Method", content="Atlas comparison method Beta favors deep review and durable decisions.", canonical_uri="user://atlas-beta", capture_method="test", captured_at="2025-02-01T00:00:00+00:00")
+    alpha_note = (await compile_source(alpha["source_id"]))["committed"][0]["note_id"]
+    beta_note = (await compile_source(beta["source_id"]))["committed"][0]["note_id"]
+    with connect() as connection:
+        connection.execute(
+            "INSERT INTO knowledge_relations(id, from_note_id, relation_type, to_note_id, source_id, confidence, created_at) VALUES ('rel_atlas', ?, 'related_to', ?, ?, 0.9, datetime('now'))",
+            (alpha_note, beta_note, alpha["source_id"]),
+        )
+
+    client = TestClient(app)
+    compared = client.post("/knowledge/query", json={"query": "Atlas Method", "mode": "compare", "limit": 6}).json()
+    assert compared["mode"] == "compare"
+    assert len(compared["comparison"]["subjects"]) == 2
+    assert {item["id"] for item in compared["comparison"]["subjects"]} == {alpha_note, beta_note}
+
+    timeline = client.post("/knowledge/query", json={"query": "Atlas Method", "mode": "timeline", "limit": 6}).json()
+    assert timeline["mode"] == "timeline"
+    captured = [event for event in timeline["timeline"] if event["type"] == "source.captured"]
+    assert [event["timestamp"] for event in captured] == sorted(event["timestamp"] for event in captured)
+    assert {event["source_id"] for event in captured} == {alpha["source_id"], beta["source_id"]}
+
+    explored = client.post("/knowledge/query", json={"query": "Atlas Alpha", "mode": "explore", "limit": 3}).json()
+    assert explored["mode"] == "explore"
+    assert any(edge["from"] == alpha_note and edge["to"] == beta_note for edge in explored["graph"]["edges"])
+    assert {node["id"] for node in explored["graph"]["nodes"]} >= {alpha_note, beta_note}
+
+
+@pytest.mark.asyncio
+async def test_relation_expansion_retrieves_two_hop_inbound_and_outbound_notes(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(compiler, "get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"))
+
+    async def make_note(title: str, uri: str, content: str) -> tuple[dict, str]:
+        source = ingest_content(source_type="user", title=title, content=content, canonical_uri=uri, capture_method="test")
+        note_id = (await compile_source(source["source_id"]))["committed"][0]["note_id"]
+        return source, note_id
+
+    seed_source, seed = await make_note("Quasar Seed", "user://quasar-seed", "Unique quasar-signal-771 starts the relation expansion chain.")
+    middle_source, middle = await make_note("Bridge Topic", "user://bridge-topic", "A bridge page discussing dependency structure without the seed terminology.")
+    leaf_source, leaf = await make_note("Remote Leaf", "user://remote-leaf", "A remote leaf only reachable through an inbound second-hop edge.")
+    with connect() as connection:
+        connection.execute("INSERT INTO knowledge_relations(id, from_note_id, relation_type, to_note_id, source_id, confidence, created_at) VALUES ('rel_q1', ?, 'depends_on', ?, ?, 1.0, datetime('now'))", (seed, middle, seed_source["source_id"]))
+        connection.execute("INSERT INTO knowledge_relations(id, from_note_id, relation_type, to_note_id, source_id, confidence, created_at) VALUES ('rel_q2', ?, 'supports', ?, ?, 0.8, datetime('now'))", (leaf, middle, leaf_source["source_id"]))
+
+    expanded = search_knowledge("quasar-signal-771", 5, relation_depth=2)
+    by_id = {item["id"]: item for item in expanded}
+    assert by_id[seed]["match_type"] == "lexical"
+    assert by_id[middle]["match_type"] == "relation"
+    assert by_id[leaf]["match_type"] == "relation"
+    assert len(by_id[leaf]["relation_paths"][0]) == 2
+    assert by_id[leaf]["relation_paths"][0][-1]["direction"] == "inbound"
+
+    TestClient(app).put(f"/knowledge/notes/{leaf}/archive", json={"archived": True})
+    after_archive = {item["id"] for item in search_knowledge("quasar-signal-771", 5, relation_depth=2)}
+    assert leaf not in after_archive
 
 
 @pytest.mark.asyncio
@@ -466,6 +841,74 @@ def test_docx_and_image_import(knowledge_data_dir, tmp_path, monkeypatch: pytest
     assert image_result["status"] == "created"
 
 
+def test_scanned_pdf_uses_page_level_hybrid_ocr(knowledge_data_dir, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import pypdf
+
+    pdf_path = tmp_path / "hybrid-scan.pdf"
+    pdf_path.write_bytes(b"%PDF-test-placeholder")
+
+    class FakePage:
+        def __init__(self, text: str): self.text = text
+        def extract_text(self): return self.text
+
+    class FakeReader:
+        pages = [
+            FakePage("This digital first page has a valid text layer with more than forty meaningful characters for extraction."),
+            FakePage(""),
+        ]
+        metadata = {"/Title": "Hybrid Scan"}
+        def __init__(self, path): pass
+
+    monkeypatch.setattr(pypdf, "PdfReader", FakeReader)
+    monkeypatch.setattr(
+        "backend.app.knowledge.document_parser._ocr_pdf_page",
+        lambda path, index: ("OCR recovered the scanned second page with usable knowledge.", 0.91, 4),
+    )
+    parsed = parse_document(pdf_path)
+    assert parsed.capture_method == "pdf_hybrid_ocr"
+    assert parsed.metadata["text_pages"] == 1
+    assert parsed.metadata["ocr_pages"] == 1
+    assert "page:001 method:text" in parsed.content
+    assert "page:002 method:ocr confidence:0.910" in parsed.content
+    assert "OCR recovered" in parsed.content
+
+
+@pytest.mark.asyncio
+async def test_complex_browser_capture_prefers_extracted_content_and_keeps_metadata(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.app.tools.knowledge import operations
+
+    async def rich_page():
+        return {
+            "tab_id": 7,
+            "url": "https://example.com/complex",
+            "title": "Complex Article",
+            "visible_text": "Navigation noise that should not become the source body.",
+            "content_text": "The extracted article body contains durable complex-page knowledge and enough detail.",
+            "dom_summary": [],
+            "metadata": {"author": "Ada", "canonical_url": "https://example.com/complex"},
+            "headings": [{"level": 1, "text": "Complex Article"}],
+            "json_ld": [{"@type": "Article"}],
+            "extraction_method": "readability_heuristic",
+            "content_quality": {"characters": 82, "frame_count": 1},
+            "captured_at": "2026-01-02T00:00:00+00:00",
+        }
+
+    monkeypatch.setattr(operations.browser_bridge, "collect_page", rich_page)
+    monkeypatch.setattr(operations, "get_knowledge_settings", lambda: SimpleNamespace(enabled=True, auto_compile=False))
+    result = await operations._ingest_current_page({"compile": False})
+    assert result.ok is True
+    source = get_source(result.data["source_id"])
+    snapshot = get_snapshot(source["current_snapshot_id"])
+    content = from_knowledge_relative(snapshot["markdown_path"]).read_text(encoding="utf-8")
+    assert "durable complex-page knowledge" in content
+    assert "Navigation noise" not in content
+    metadata = snapshot["metadata"]
+    assert metadata["page_metadata"]["author"] == "Ada"
+    assert metadata["extraction_method"] == "readability_heuristic"
+
+
 def test_profile_isolation(knowledge_data_dir) -> None:
     first = ingest_content(
         source_type="user", title="Default Profile", content="Default profile knowledge content remains isolated from other profiles.",
@@ -490,6 +933,48 @@ def test_created_profile_matches_api_contract(knowledge_data_dir) -> None:
     assert profile["is_active"] is False
     assert profile["source_count"] == 0
     assert profile["note_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_profiles_and_memberships_rebuild_completely_from_files(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(compiler, "get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"))
+    default_source = ingest_content(source_type="user", title="Default Rebuild", content="Default profile material preserved through file reconstruction.", canonical_uri="user://default-rebuild", capture_method="test")
+    default_note = (await compile_source(default_source["source_id"]))["committed"][0]["note_id"]
+    research = create_profile("Research Vault", "A profile reconstructed from its durable manifest.")
+    switch_profile(research["id"])
+    research_source = ingest_content(source_type="user", title="Research Rebuild", content="Research-only material preserved through file reconstruction.", canonical_uri="user://research-rebuild", capture_method="test")
+    research_note = (await compile_source(research_source["source_id"]))["committed"][0]["note_id"]
+
+    manifest = knowledge_root() / "profiles" / research["id"] / "profile.yaml"
+    assert "Research Vault" in manifest.read_text(encoding="utf-8")
+    with connect() as connection:
+        connection.execute("DELETE FROM knowledge_proposals")
+        connection.execute("DELETE FROM knowledge_jobs")
+        connection.execute("DELETE FROM knowledge_relations")
+        connection.execute("DELETE FROM knowledge_note_sources")
+        connection.execute("DELETE FROM knowledge_profile_notes")
+        connection.execute("DELETE FROM knowledge_profile_sources")
+        connection.execute("DELETE FROM knowledge_notes")
+        connection.execute("DELETE FROM knowledge_snapshots")
+        connection.execute("DELETE FROM knowledge_sources")
+        connection.execute("DELETE FROM knowledge_profiles")
+        connection.execute("DELETE FROM knowledge_fts")
+    init_db()
+
+    rebuilt = rebuild_index()
+    assert rebuilt["profiles"] == 2
+    profiles = {item["id"]: item for item in list_profiles()}
+    assert profiles[research["id"]]["description"] == "A profile reconstructed from its durable manifest."
+    assert profiles[research["id"]]["is_active"] is True
+    assert get_source(research_source["source_id"]) is not None
+    assert get_note(research_note) is not None
+    assert get_source(default_source["source_id"]) is None
+    switch_profile("profile_default")
+    assert get_source(default_source["source_id"]) is not None
+    assert get_note(default_note) is not None
+    assert get_source(research_source["source_id"]) is None
 
 
 @pytest.mark.asyncio
@@ -602,3 +1087,29 @@ async def test_catalog_log_promotion_and_semantic_lint(knowledge_data_dir, monke
     assert report["model_used"] is False
     log_content = __import__("pathlib").Path(files["log.md"]).read_text(encoding="utf-8")
     assert "ingest" in log_content and "compile" in log_content and "promote" in log_content
+
+
+@pytest.mark.asyncio
+async def test_semantic_lint_fix_is_persisted_applied_and_reverified(
+    knowledge_data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(compiler, "get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"))
+    monkeypatch.setattr("backend.app.knowledge.lint.get_settings", lambda: SimpleNamespace(openai_api_key=None, openai_base_url=None, openai_model="test"))
+    first = ingest_content(source_type="user", title="Lint Alpha", content="First independent semantic lint page with durable evidence.", canonical_uri="user://lint-alpha", capture_method="test")
+    second = ingest_content(source_type="user", title="Lint Beta", content="Second independent semantic lint page with durable evidence.", canonical_uri="user://lint-beta", capture_method="test")
+    await compile_source(first["source_id"])
+    await compile_source(second["source_id"])
+
+    report = await semantic_lint_knowledge()
+    assert report["run_id"].startswith("lint_")
+    assert sum(item["code"] == "ORPHAN_PAGE" for item in report["issues"]) == 1
+    issue = next(item for item in report["issues"] if item["code"] == "ORPHAN_PAGE" and item["fixable"])
+    report_path = knowledge_root() / "profiles" / "profile_default" / "lint" / f"{report['run_id']}.json"
+    assert report_path.exists()
+    result = await apply_semantic_lint_fix(report["run_id"], issue["issue_id"], confirmed=True)
+    assert result["applied"] is True
+    assert result["resolved"] is True
+    assert not any(item["code"] == "ORPHAN_PAGE" for item in result["verification"]["issues"])
+    from_note = get_note(issue["fix"]["from_note_id"])
+    assert any(relation["to_note_id"] == issue["fix"]["to_note_id"] for relation in from_note["relations"])
+    assert issue["fix"]["to_note_id"] in from_knowledge_relative(from_note["markdown_path"]).read_text(encoding="utf-8")

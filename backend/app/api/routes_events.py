@@ -9,9 +9,9 @@ router = APIRouter(tags=["events"])
 
 
 @router.get("/events")
-async def events() -> StreamingResponse:
+async def events(task_id: str | None = None) -> StreamingResponse:
     return StreamingResponse(
-        event_bus.subscribe(),
+        event_bus.subscribe(task_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

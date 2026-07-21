@@ -28,7 +28,7 @@ async def _handler(_: dict) -> ToolResult:
         tab_id=str(page.get("tab_id")) if page.get("tab_id") is not None else None,
         url=url,
         title=page.get("title"),
-        visible_text=page.get("visible_text") or "",
+        visible_text=page.get("content_text") or page.get("visible_text") or "",
         dom_summary=page.get("dom_summary") or [],
         captured_at=page.get("captured_at") or now_iso(),
     )

@@ -8,6 +8,122 @@ if (!globalState[INSTALL_FLAG]) {
     return document.body?.innerText?.slice(0, maxChars) ?? "";
   }
 
+  function pageMetadata() {
+    const meta = (name: string) =>
+      document.querySelector(`meta[name="${name}"],meta[property="${name}"]`)?.getAttribute("content") ?? "";
+    const canonical = (document.querySelector("link[rel='canonical']") as HTMLLinkElement | null)?.href ?? location.href;
+    return {
+      canonical_url: canonical,
+      language: document.documentElement.lang || meta("og:locale"),
+      description: meta("description") || meta("og:description"),
+      author: meta("author") || meta("article:author"),
+      published_at: meta("article:published_time") || document.querySelector("time[datetime]")?.getAttribute("datetime") || "",
+      modified_at: meta("article:modified_time"),
+      site_name: meta("og:site_name"),
+    };
+  }
+
+  function jsonLdBlocks() {
+    return Array.from(document.querySelectorAll("script[type='application/ld+json']"))
+      .slice(0, 20)
+      .flatMap((script) => {
+        try {
+          const value = JSON.parse(script.textContent || "null");
+          return Array.isArray(value) ? value : value ? [value] : [];
+        } catch {
+          return [];
+        }
+      });
+  }
+
+  function readableCandidate(element: Element) {
+    const clone = element.cloneNode(true) as Element;
+    clone.querySelectorAll("script,style,noscript,nav,footer,header,aside,form,button,[aria-hidden='true'],.advertisement,.ads,.cookie,.modal").forEach((node) => node.remove());
+    const text = (clone.textContent ?? "").replace(/\s+/g, " ").trim();
+    const paragraphText = Array.from(clone.querySelectorAll("p,li,blockquote,pre")).map((node) => (node.textContent ?? "").trim()).filter(Boolean).join("\n\n");
+    const links = Array.from(clone.querySelectorAll("a")).reduce((sum, link) => sum + (link.textContent ?? "").length, 0);
+    const score = paragraphText.length + text.length * 0.2 + clone.querySelectorAll("h1,h2,h3").length * 80 - links * 0.8;
+    return { text: paragraphText || text, score, selector: cssPath(element) || element.tagName.toLowerCase() };
+  }
+
+  function collectOpenShadowText(root: Document | ShadowRoot = document): string[] {
+    const values: string[] = [];
+    root.querySelectorAll("*").forEach((element) => {
+      const shadow = (element as HTMLElement).shadowRoot;
+      if (!shadow) return;
+      const text = (shadow.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (text.length >= 20) values.push(text);
+      values.push(...collectOpenShadowText(shadow));
+    });
+    return values;
+  }
+
+  function collectFrameText(): Array<{ url: string; title: string; text: string }> {
+    return Array.from(document.querySelectorAll("iframe")).slice(0, 20).flatMap((frame) => {
+      try {
+        const child = (frame as HTMLIFrameElement).contentDocument;
+        const text = child?.body?.innerText?.trim() ?? "";
+        return text ? [{ url: (frame as HTMLIFrameElement).src, title: child?.title ?? "", text: text.slice(0, 10000) }] : [];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  async function waitForDomSettled(quietMs = 250, timeoutMs = 1500): Promise<void> {
+    await new Promise<void>((resolve) => {
+      let quietTimer = window.setTimeout(done, quietMs);
+      const timeout = window.setTimeout(done, timeoutMs);
+      const observer = new MutationObserver(() => {
+        window.clearTimeout(quietTimer);
+        quietTimer = window.setTimeout(done, quietMs);
+      });
+      function done() {
+        observer.disconnect();
+        window.clearTimeout(quietTimer);
+        window.clearTimeout(timeout);
+        resolve();
+      }
+      observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+    });
+  }
+
+  async function collectRichPage(maxChars: number) {
+    await waitForDomSettled();
+    const candidates = Array.from(document.querySelectorAll("article,main,[role='main'],.post,.article,.entry-content,.content"));
+    if (document.body) candidates.push(document.body);
+    const best = candidates.map(readableCandidate).sort((a, b) => b.score - a.score)[0];
+    const frames = collectFrameText();
+    const shadowText = collectOpenShadowText();
+    const primary = best?.text || collectVisibleText(maxChars);
+    const supplements = [...frames.map((frame) => frame.text), ...shadowText];
+    const contentText = [primary, ...supplements].filter(Boolean).join("\n\n").slice(0, maxChars);
+    const visibleText = collectVisibleText(maxChars);
+    const quality = {
+      characters: contentText.length,
+      visible_characters: visibleText.length,
+      paragraph_count: contentText.split(/\n\s*\n/).filter(Boolean).length,
+      frame_count: frames.length,
+      shadow_root_count: shadowText.length,
+      score: best?.score ?? 0,
+      truncated: contentText.length >= maxChars,
+    };
+    return {
+      url: location.href,
+      title: document.title,
+      visible_text: visibleText,
+      content_text: contentText,
+      dom_summary: collectDomSummary(),
+      metadata: pageMetadata(),
+      headings: Array.from(document.querySelectorAll("h1,h2,h3")).slice(0, 100).map((heading) => ({ level: Number(heading.tagName.slice(1)), text: normalizeCellText(heading.textContent ?? "", 300) })),
+      json_ld: jsonLdBlocks(),
+      frames: frames.map(({ text, ...frame }) => ({ ...frame, characters: text.length })),
+      extraction_method: best?.selector === "body" ? "document_fallback" : "readability_heuristic",
+      content_quality: quality,
+      captured_at: new Date().toISOString(),
+    };
+  }
+
   function collectDomSummary() {
     return Array.from(document.querySelectorAll("h1,h2,h3,button,a,input,textarea,select"))
       .slice(0, 200)
@@ -270,14 +386,18 @@ if (!globalState[INSTALL_FLAG]) {
     if (message?.type !== "DESKPILOT_COLLECT_PAGE") {
       return false;
     }
-    const maxTextChars = Number(message.payload?.max_text_chars ?? 30000);
-    sendResponse({
+    const requested = Number(message.payload?.max_text_chars ?? 100000);
+    const maxTextChars = Number.isFinite(requested) ? Math.min(Math.max(requested, 1000), 200000) : 100000;
+    void collectRichPage(maxTextChars).then(sendResponse).catch((error) => sendResponse({
       url: location.href,
       title: document.title,
       visible_text: collectVisibleText(maxTextChars),
+      content_text: collectVisibleText(maxTextChars),
       dom_summary: collectDomSummary(),
+      extraction_method: "document_fallback",
+      content_quality: { characters: collectVisibleText(maxTextChars).length, error: error instanceof Error ? error.message : String(error) },
       captured_at: new Date().toISOString(),
-    });
+    }));
     return true;
   });
 }

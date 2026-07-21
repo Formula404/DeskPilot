@@ -44,6 +44,9 @@ def ensure_profile_workspace() -> Path:
     log = root / "log.md"
     if not log.exists():
         atomic_write(log, "# Wiki Log\n")
+    from backend.app.knowledge.profiles import sync_profile_manifest
+
+    sync_profile_manifest(active_profile_id())
     return root
 
 

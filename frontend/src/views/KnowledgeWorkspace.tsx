@@ -58,6 +58,7 @@ import type {
   KnowledgeSourceDetail,
   KnowledgeSourceSummary,
   KnowledgeStatus
+  ,KnowledgeQueryMode
 } from "../types/api";
 import { hideCurrentWindow, isTauriRuntime, showWindow } from "./windowActions";
 
@@ -95,6 +96,7 @@ export function KnowledgeWorkspaceView() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [action, setAction] = useState<"idle" | "ingest" | "compile" | "review" | "query" | "promote" | "check" | "watch" | "refresh-note" | "edit-note" | "delete-note">("idle");
   const [queryAnswer, setQueryAnswer] = useState("");
+  const [queryMode, setQueryMode] = useState<KnowledgeQueryMode>("answer");
   const [queryResults, setQueryResults] = useState<KnowledgeNoteSummary[]>([]);
   const [notice, setNotice] = useState<Notice>(null);
   const [profiles, setProfiles] = useState<KnowledgeProfile[]>([]);
@@ -342,7 +344,7 @@ export function KnowledgeWorkspaceView() {
     if (!query.trim()) return;
     setAction("query");
     try {
-      const result = await answerKnowledge(query.trim());
+      const result = await answerKnowledge(query.trim(), queryMode);
       setQueryAnswer(result.answer);
       setQueryResults(result.results);
     } catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "知识查询失败" }); }
@@ -362,11 +364,11 @@ export function KnowledgeWorkspaceView() {
     finally { setAction("idle"); }
   }
 
-  async function resolveProposal(decision: "accept" | "reject") {
+  async function resolveProposal(decision: "accept" | "reject", force = false) {
     if (!selectedProposalId) return;
     setAction("review");
     try {
-      const result = await resolveKnowledgeProposal(selectedProposalId, decision) as { note?: { note_id?: string; id?: string } };
+      const result = await resolveKnowledgeProposal(selectedProposalId, decision, force) as { note?: { note_id?: string; id?: string } };
       await Promise.all([refreshStatus(), loadProposals(), loadNotes()]);
       if (decision === "accept") {
         const noteId = result.note?.note_id || result.note?.id || proposalDetail?.target_note_id;
@@ -446,7 +448,7 @@ export function KnowledgeWorkspaceView() {
         </div>
 
         <div className="knowledge-filter-row" data-no-window-drag>
-          {view === "query" ? <button className="workspace-query-button" onClick={() => void runQuery()} disabled={action !== "idle" || !query.trim()}>{action === "query" ? "检索中" : "查询 Wiki"}</button> : view === "notes" ? <>
+          {view === "query" ? <><select aria-label="知识库查询模式" value={queryMode} onChange={(event) => setQueryMode(event.target.value as KnowledgeQueryMode)}><option value="answer">回答</option><option value="compare">比较</option><option value="timeline">时间线</option><option value="explore">探索</option></select><button className="workspace-query-button" onClick={() => void runQuery()} disabled={action !== "idle" || !query.trim()}>{action === "query" ? "检索中" : "查询 Wiki"}</button></> : view === "notes" ? <>
             <select value={entityType} onChange={(event) => setEntityType(event.target.value)} aria-label="知识类型">
               <option value="">全部类型</option>
               {Object.entries(entityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
@@ -477,7 +479,7 @@ export function KnowledgeWorkspaceView() {
         ) : view === "sources" ? (
           sourceDetail ? <SourceDetail detail={sourceDetail} snapshot={snapshotDetail} action={action} onCompile={() => void runCompile()} onSnapshot={async (id) => setSnapshotDetail(await getKnowledgeSnapshot(id))} onWatch={(enabled) => void changeWatch(enabled)} onCheck={() => void checkSourceNow()} /> : <EmptyDetail />
         ) : view === "review" && proposalDetail ? (
-          <ProposalDetail detail={proposalDetail} action={action} onResolve={(decision) => void resolveProposal(decision)} />
+          <ProposalDetail detail={proposalDetail} action={action} onResolve={(decision, force) => void resolveProposal(decision, force)} />
         ) : view === "query" && queryAnswer ? <article className="knowledge-document"><header><div className="knowledge-document-kicker"><span>Wiki 综合回答</span></div><h1>{query}</h1></header><div className="knowledge-markdown-text">{queryAnswer}</div><div className="knowledge-review-actions"><button className="is-accept" disabled={action !== "idle" || !queryResults.length} onClick={() => void promoteQuery()}><Plus size={16} />沉淀为知识页面</button></div></article> : <EmptyDetail />}
       </section>
     </main>
@@ -549,13 +551,15 @@ function SourceDetail({ detail, snapshot, action, onCompile, onSnapshot, onWatch
   </article>;
 }
 
-function ProposalDetail({ detail, action, onResolve }: { detail: KnowledgeProposalDetail; action: string; onResolve: (decision: "accept" | "reject") => void }) {
+function ProposalDetail({ detail, action, onResolve }: { detail: KnowledgeProposalDetail; action: string; onResolve: (decision: "accept" | "reject", force?: boolean) => void }) {
   const operation = detail.payload?.operation;
   return <article className="knowledge-document">
     <header><div className="knowledge-document-kicker"><span>需要你的确认</span><span className="knowledge-badge is-pending">未处理</span></div><h1>{operation?.title || detail.target_title || "知识变更"}</h1><p className="knowledge-document-meta">{detail.id} · {operationLabel(detail.operation)}</p></header>
+    {!detail.diff.base.matches ? <section className="knowledge-action-callout is-warning" role="alert"><div><CircleAlert size={18} /><span><strong>当前页面已在提案生成后变化</strong><small>建议重新生成提案。若你已检查逐行差异，也可以明确覆盖当前编辑。</small></span></div></section> : null}
     <section className="knowledge-purpose-strip"><strong>为什么需要确认？</strong><span>AI 建议修改已有知识。接受会把右侧内容写入知识库；拒绝会保留当前版本。</span></section>
-    <div className="knowledge-review-actions"><button className="is-accept" disabled={action !== "idle"} onClick={() => onResolve("accept")}>{action === "review" ? <LoaderCircle className="is-spinning" size={16} /> : <Check size={16} />}接受修改</button><button className="is-reject" disabled={action !== "idle"} onClick={() => onResolve("reject")}><X size={16} />保留当前版本</button></div>
+    <div className="knowledge-review-actions"><button className="is-accept" disabled={action !== "idle" || !detail.diff.base.matches} onClick={() => onResolve("accept")}>{action === "review" ? <LoaderCircle className="is-spinning" size={16} /> : <Check size={16} />}接受修改</button>{!detail.diff.base.matches ? <button className="is-danger" disabled={action !== "idle"} onClick={() => { if (window.confirm("强制接受会覆盖提案生成后的页面编辑。确认已经检查差异并继续吗？")) onResolve("accept", true); }}><CircleAlert size={16} />强制接受并覆盖</button> : null}<button className="is-reject" disabled={action !== "idle"} onClick={() => onResolve("reject")}><X size={16} />保留当前版本</button></div>
     <div className="knowledge-diff-grid"><section><h2>当前内容</h2><DiffField label="摘要" value={detail.target_note?.sections.Summary} empty="新建条目" /><DiffField label="概览" value={detail.target_note?.sections.Overview} /></section><section className="is-proposed"><h2>提议内容</h2><DiffField label="摘要" value={operation?.summary} /><DiffField label="概览" value={operation?.overview} /><DiffField label="详情" value={operation?.details_markdown} /></section></div>
+    {detail.diff.unified_diff.length ? <section className="knowledge-document-section"><h2>逐行差异</h2><pre className="knowledge-review-unified-diff">{detail.diff.unified_diff.join("\n")}</pre></section> : null}
   </article>;
 }
 

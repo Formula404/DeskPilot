@@ -31,7 +31,7 @@ class EventBus:
         for queue in list(self._subscribers):
             await queue.put(event)
 
-    async def subscribe(self) -> AsyncIterator[str]:
+    async def subscribe(self, task_id: str | None = None) -> AsyncIterator[str]:
         queue: asyncio.Queue[EventMessage] = asyncio.Queue()
         self._subscribers.add(queue)
         try:
@@ -40,6 +40,8 @@ class EventBus:
                     event = await asyncio.wait_for(queue.get(), timeout=15)
                 except TimeoutError:
                     yield ": keep-alive\n\n"
+                    continue
+                if task_id and event.task_id != task_id:
                     continue
                 yield f"event: {event.type}\ndata: {json.dumps(event.model_dump(), ensure_ascii=False)}\n\n"
         finally:

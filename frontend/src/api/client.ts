@@ -1,6 +1,7 @@
 import type {
   ChatResponse,
   KnowledgeLintResult,
+  KnowledgeJob,
   KnowledgeNoteDetail,
   KnowledgeNoteSummary,
   KnowledgeProfile,
@@ -12,6 +13,8 @@ import type {
   KnowledgeSourceSummary,
   KnowledgeStatus,
   KnowledgeWebWatch,
+  KnowledgeQueryMode,
+  KnowledgeQueryResult,
   TaskEvent
 } from "../types/api";
 
@@ -72,7 +75,12 @@ export function openEventStream(
     "approval.required",
     "task.completed",
     "task.failed",
-    "task.cancelled"
+    "task.cancelled",
+    "knowledge.job.started",
+    "knowledge.job.progress",
+    "knowledge.job.completed",
+    "knowledge.job.failed",
+    "knowledge.job.cancelled"
   ];
   for (const type of eventTypes) {
     source.addEventListener(type, (message) => {
@@ -177,9 +185,33 @@ export function openKnowledgeStorage(): Promise<{ ok: boolean }> {
   return apiJson("/knowledge/storage/open", { method: "POST" });
 }
 
-export async function answerKnowledge(query: string): Promise<{ answer: string; results: KnowledgeNoteSummary[]; reading_level: string }> {
-  const result = await apiJson<{ answer: string; results: Array<KnowledgeNoteSummary & { path?: string }>; reading_level: string }>("/knowledge/query", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query, mode: "answer" }) });
+export async function answerKnowledge(query: string, mode: KnowledgeQueryMode = "answer"): Promise<KnowledgeQueryResult> {
+  const result = await apiJson<Omit<KnowledgeQueryResult, "results"> & { results: Array<KnowledgeNoteSummary & { path?: string }> }>("/knowledge/query", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query, mode }) });
   return { ...result, results: result.results.map((item) => ({ ...item, markdown_path: item.markdown_path ?? item.path ?? "", updated_at: item.updated_at ?? "" })) };
+}
+
+export function enqueueKnowledgeJob(jobType: "compile" | "lint" | "semantic_lint" | "rebuild_index" | "full_backup", targetId?: string, input: Record<string, unknown> = {}): Promise<KnowledgeJob> {
+  return apiJson("/knowledge/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_type: jobType, target_id: targetId, input }) });
+}
+
+export function getKnowledgeJob(jobId: string): Promise<KnowledgeJob & { events: Array<Record<string, unknown>> }> {
+  return apiJson(`/knowledge/jobs/${jobId}`);
+}
+
+export function cancelKnowledgeJob(jobId: string): Promise<{ ok: boolean }> {
+  return apiJson(`/knowledge/jobs/${jobId}/cancel`, { method: "POST" });
+}
+
+export function retryKnowledgeJob(jobId: string): Promise<{ ok: boolean }> {
+  return apiJson(`/knowledge/jobs/${jobId}/retry`, { method: "POST" });
+}
+
+export function openKnowledgeJobEventStream(jobId: string, onEvent: (event: TaskEvent) => void): EventSource {
+  const source = new EventSource(`${API_BASE}/events?task_id=${encodeURIComponent(jobId)}`);
+  for (const type of ["knowledge.job.started", "knowledge.job.progress", "knowledge.job.completed", "knowledge.job.failed", "knowledge.job.cancelled"]) {
+    source.addEventListener(type, (message) => onEvent(JSON.parse((message as MessageEvent).data)));
+  }
+  return source;
 }
 
 export function promoteKnowledgeAnswer(title: string, answer: string, noteIds: string[]): Promise<KnowledgeNoteDetail> {
@@ -207,11 +239,11 @@ export async function getKnowledgeProposals(): Promise<KnowledgeProposal[]> {
   return result.items;
 }
 
-export function resolveKnowledgeProposal(proposalId: string, decision: "accept" | "reject"): Promise<Record<string, unknown>> {
+export function resolveKnowledgeProposal(proposalId: string, decision: "accept" | "reject", force = false): Promise<Record<string, unknown>> {
   return apiJson<Record<string, unknown>>(`/knowledge/proposals/${proposalId}/resolve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ decision })
+    body: JSON.stringify({ decision, force })
   });
 }
 

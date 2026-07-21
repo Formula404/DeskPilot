@@ -34,20 +34,60 @@ def _parse_pdf(path: Path) -> ParsedDocument:
 
     reader = PdfReader(str(path))
     pages: list[str] = []
+    page_methods: list[dict] = []
     for index, page in enumerate(reader.pages, start=1):
         text = (page.extract_text() or "").strip()
-        if text:
-            pages.append(f"## Page {index}\n\n{text}")
+        meaningful_chars = sum(character.isalnum() or "\u4e00" <= character <= "\u9fff" for character in text)
+        if meaningful_chars >= 40:
+            pages.append(f"## Page {index}\n\n<!-- page:{index:03d} method:text -->\n{text}")
+            page_methods.append({"page": index, "method": "text", "characters": len(text)})
+            continue
+        ocr_text, confidence, item_count = _ocr_pdf_page(path, index - 1)
+        if ocr_text.strip():
+            pages.append(f"## Page {index}\n\n<!-- page:{index:03d} method:ocr confidence:{confidence:.3f} -->\n{ocr_text}")
+            page_methods.append({"page": index, "method": "ocr", "characters": len(ocr_text), "ocr_items": item_count, "ocr_average_confidence": confidence})
+        elif text:
+            pages.append(f"## Page {index}\n\n<!-- page:{index:03d} method:text-low-quality -->\n{text}")
+            page_methods.append({"page": index, "method": "text-low-quality", "characters": len(text)})
     content = "\n\n".join(pages).strip()
     if not content:
-        raise ValueError("PDF 没有可提取文本；扫描版 PDF 请先导出为图片后使用 OCR 导入。")
+        raise ValueError("PDF 文本层和逐页 OCR 均未识别到有效文字。")
     metadata = {
         "format": "pdf",
         "page_count": len(reader.pages),
         "document_metadata": {str(key): str(value) for key, value in (reader.metadata or {}).items()},
+        "pages": page_methods,
+        "text_pages": sum(item["method"] == "text" for item in page_methods),
+        "ocr_pages": sum(item["method"] == "ocr" for item in page_methods),
     }
     title = str((reader.metadata or {}).get("/Title") or path.stem)
-    return ParsedDocument(title, content, "pdf_text_extraction", metadata)
+    method = "pdf_hybrid_ocr" if metadata["ocr_pages"] and metadata["text_pages"] else ("pdf_scanned_ocr" if metadata["ocr_pages"] else "pdf_text_extraction")
+    return ParsedDocument(title, content, method, metadata)
+
+
+def _ocr_pdf_page(path: Path, page_index: int) -> tuple[str, float, int]:
+    import tempfile
+
+    import pypdfium2 as pdfium
+
+    from backend.app.rpa.ocr import ocr_image
+
+    document = pdfium.PdfDocument(str(path))
+    try:
+        page = document[page_index]
+        bitmap = page.render(scale=2.5, rotation=0)
+        image = bitmap.to_pil()
+        with tempfile.TemporaryDirectory(prefix="deskpilot-pdf-ocr-") as temporary:
+            image_path = Path(temporary) / f"page-{page_index + 1}.png"
+            image.save(image_path, format="PNG")
+            items = ocr_image(image_path)
+    finally:
+        document.close()
+    accepted = [item for item in items if float(item.get("confidence", 0)) >= 0.45 and str(item.get("text", "")).strip()]
+    if not accepted:
+        return "", 0.0, 0
+    confidence = sum(float(item.get("confidence", 0)) for item in accepted) / len(accepted)
+    return "\n".join(str(item["text"]).strip() for item in accepted), confidence, len(accepted)
 
 
 def _parse_docx(path: Path) -> ParsedDocument:

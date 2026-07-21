@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -20,6 +21,7 @@ from backend.app.knowledge.repository import (
     update_source,
 )
 from backend.app.knowledge.catalog import append_log
+from backend.app.knowledge.locking import knowledge_locks
 
 TRACKING_PARAMETERS = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "ref_src"}
 SECRET_PATTERNS = [
@@ -67,7 +69,7 @@ def _source_path(source_type: str, source_id: str, snapshot_id: str, captured_at
     return root / f"{source_id}--{snapshot_id[-8:]}.md"
 
 
-def ingest_content(
+def _ingest_content_locked(
     *,
     source_type: str,
     title: str,
@@ -173,6 +175,35 @@ def ingest_content(
         "title": clean_title,
         "is_new_source": is_new_source,
     }
+
+
+def ingest_content(
+    *,
+    source_type: str,
+    title: str,
+    content: str,
+    canonical_uri: str | None,
+    sensitivity: Sensitivity = "normal",
+    capture_method: str,
+    captured_at: str | None = None,
+    browser_context_id: str | None = None,
+    metadata: dict | None = None,
+) -> dict:
+    normalized_uri = canonicalize_url(canonical_uri) if source_type == "web" and canonical_uri else canonical_uri
+    lock_identity = normalized_uri or f"content:{sha256_text(content.strip())}"
+    lock_key = f"source-uri:{source_type}:{hashlib.sha256(lock_identity.encode('utf-8')).hexdigest()}"
+    with knowledge_locks([lock_key], wait_seconds=5):
+        return _ingest_content_locked(
+            source_type=source_type,
+            title=title,
+            content=content,
+            canonical_uri=normalized_uri,
+            sensitivity=sensitivity,
+            capture_method=capture_method,
+            captured_at=captured_at,
+            browser_context_id=browser_context_id,
+            metadata=metadata,
+        )
 
 
 def ingest_file(path_value: str, *, sensitivity: Sensitivity = "normal") -> dict:

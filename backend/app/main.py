@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from backend.app.api.routes_browser import router as browser_router
 from backend.app.api.routes_chat import router as chat_router
@@ -19,6 +20,7 @@ from backend.app.core.paths import ensure_data_dirs
 from backend.app.db.connection import init_db
 from backend.app.knowledge.paths import ensure_knowledge_dirs
 from backend.app.knowledge.web_monitor import scheduler_loop
+from backend.app.knowledge.jobs import knowledge_job_manager
 
 
 def create_app() -> FastAPI:
@@ -34,13 +36,16 @@ def create_app() -> FastAPI:
     async def lifespan(_: FastAPI):
         scheduler_stop.clear()
         scheduler_task = asyncio.create_task(scheduler_loop(scheduler_stop))
+        knowledge_job_manager.recover()
         try:
             yield
         finally:
             scheduler_stop.set()
-            await scheduler_task
+            await knowledge_job_manager.shutdown()
+            await asyncio.gather(scheduler_task, return_exceptions=True)
 
     app = FastAPI(title="DeskPilot API", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

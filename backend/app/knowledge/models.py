@@ -31,7 +31,7 @@ class SourceFrontmatter(BaseModel):
     sensitivity: Sensitivity = "normal"
     capture_method: str
     browser_context_id: str | None = None
-    status: Literal["active", "archived"] = "active"
+    status: Literal["active", "archived", "trashed"] = "active"
 
 
 class NoteFrontmatter(BaseModel):
@@ -41,7 +41,7 @@ class NoteFrontmatter(BaseModel):
     entity_type: EntityType
     title: str
     aliases: list[str] = Field(default_factory=list)
-    status: Literal["draft", "active", "stale", "archived"] = "active"
+    status: Literal["draft", "active", "stale", "archived", "trashed"] = "active"
     created_at: str
     updated_at: str
     source_ids: list[str] = Field(default_factory=list)

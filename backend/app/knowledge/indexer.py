@@ -122,6 +122,14 @@ def search_index(query: str, limit: int = 8) -> list[dict[str, Any]]:
 
 
 def rebuild_index() -> dict[str, int]:
+    from backend.app.knowledge.profiles import load_profile_manifests, rebuild_profiles_from_files
+
+    profile_manifests = load_profile_manifests()
+    if profile_manifests:
+        # Recreate profile rows first so note/source upserts can satisfy membership FKs.
+        # The in-memory copy is reapplied at the end because indexing temporarily links
+        # legacy documents to the default profile.
+        rebuild_profiles_from_files(profile_manifests)
     with connect() as connection:
         connection.execute("DELETE FROM knowledge_fts")
     counts = {"notes": 0, "sources": 0, "errors": 0}
@@ -249,6 +257,8 @@ def rebuild_index() -> dict[str, int]:
                     )
         except Exception:
             counts["errors"] += 1
+    profile_result = rebuild_profiles_from_files(profile_manifests)
+    counts["profiles"] = int(profile_result["profiles"])
     return counts
 
 

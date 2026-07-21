@@ -10,9 +10,13 @@ from backend.app.knowledge.markdown import normalize_title
 from backend.app.knowledge.profiles import active_profile_id, link_note, link_source
 
 
-def get_source(source_id: str) -> dict[str, Any] | None:
+def get_source(source_id: str, *, include_trashed: bool = False) -> dict[str, Any] | None:
     with connect() as connection:
-        row = connection.execute("SELECT s.* FROM knowledge_sources s JOIN knowledge_profile_sources ps ON ps.source_id=s.id WHERE s.id=? AND ps.profile_id=?", (source_id, active_profile_id())).fetchone()
+        row = connection.execute(
+            "SELECT s.* FROM knowledge_sources s JOIN knowledge_profile_sources ps ON ps.source_id=s.id "
+            "WHERE s.id=? AND ps.profile_id=?" + ("" if include_trashed else " AND s.status!='trashed'"),
+            (source_id, active_profile_id()),
+        ).fetchone()
     return dict(row) if row else None
 
 
@@ -158,7 +162,7 @@ def list_sources(
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    clauses = ["1 = 1"]
+    clauses = ["1 = 1" if status else "s.status != 'trashed'"]
     values: list[Any] = []
     if query:
         clauses.append("(title LIKE ? OR canonical_uri LIKE ?)")
@@ -192,7 +196,7 @@ def count_sources(
     source_type: str | None = None,
     status: str | None = None,
 ) -> int:
-    clauses = ["1 = 1"]
+    clauses = ["1 = 1" if status else "s.status != 'trashed'"]
     values: list[Any] = []
     if query:
         clauses.append("(title LIKE ? OR canonical_uri LIKE ?)")
@@ -225,9 +229,13 @@ def mark_source_notes_stale(source_id: str) -> int:
     return cursor.rowcount
 
 
-def get_note(note_id: str) -> dict[str, Any] | None:
+def get_note(note_id: str, *, include_trashed: bool = False) -> dict[str, Any] | None:
     with connect() as connection:
-        row = connection.execute("SELECT n.* FROM knowledge_notes n JOIN knowledge_profile_notes pn ON pn.note_id=n.id WHERE n.id=? AND pn.profile_id=?", (note_id, active_profile_id())).fetchone()
+        row = connection.execute(
+            "SELECT n.* FROM knowledge_notes n JOIN knowledge_profile_notes pn ON pn.note_id=n.id "
+            "WHERE n.id=? AND pn.profile_id=?" + ("" if include_trashed else " AND n.status!='trashed'"),
+            (note_id, active_profile_id()),
+        ).fetchone()
         if not row:
             return None
         item = dict(row)
@@ -286,7 +294,7 @@ def list_notes(
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    clauses = ["1 = 1"]
+    clauses = ["1 = 1" if status else "n.status != 'trashed'"]
     values: list[Any] = []
     if query:
         clauses.append("(title LIKE ? OR normalized_title LIKE ?)")
@@ -317,7 +325,7 @@ def count_notes(
     entity_type: str | None = None,
     status: str | None = None,
 ) -> int:
-    clauses = ["1 = 1"]
+    clauses = ["1 = 1" if status else "n.status != 'trashed'"]
     values: list[Any] = []
     if query:
         clauses.append("(title LIKE ? OR normalized_title LIKE ?)")
@@ -428,16 +436,78 @@ def replace_note_relations(note_id: str, relations: list[dict[str, Any]], source
             )
 
 
-def create_job(job_type: str, target_id: str | None, input_data: dict[str, Any] | None = None) -> str:
+def expand_note_relations(
+    seed_note_ids: list[str], *, depth: int = 2, max_nodes: int = 20
+) -> list[dict[str, Any]]:
+    """Breadth-first relation expansion over both inbound and outbound profile-visible edges."""
+    seeds = list(dict.fromkeys(seed_note_ids))
+    if not seeds or depth < 1 or max_nodes < 1:
+        return []
+    visited = set(seeds)
+    frontier: list[tuple[str, list[dict[str, Any]]]] = [(seed, []) for seed in seeds]
+    expanded: list[dict[str, Any]] = []
+    profile_id = active_profile_id()
+    for hop in range(1, min(depth, 3) + 1):
+        next_frontier: list[tuple[str, list[dict[str, Any]]]] = []
+        for current_id, path in frontier:
+            with connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT r.*, CASE WHEN r.from_note_id=? THEN r.to_note_id ELSE r.from_note_id END AS neighbor_id,
+                      CASE WHEN r.from_note_id=? THEN 'outbound' ELSE 'inbound' END AS direction,
+                      n.title AS neighbor_title, n.entity_type, n.status, n.markdown_path
+                    FROM knowledge_relations r
+                    JOIN knowledge_notes n ON n.id=CASE WHEN r.from_note_id=? THEN r.to_note_id ELSE r.from_note_id END
+                    JOIN knowledge_profile_notes pn ON pn.note_id=n.id AND pn.profile_id=?
+                    WHERE (r.from_note_id=? OR r.to_note_id=?) AND n.status NOT IN ('archived','trashed')
+                    ORDER BY COALESCE(r.confidence, 1.0) DESC, r.created_at ASC
+                    """,
+                    (current_id, current_id, current_id, profile_id, current_id, current_id),
+                ).fetchall()
+            for row in rows:
+                neighbor_id = str(row["neighbor_id"])
+                if neighbor_id in visited:
+                    continue
+                edge = {
+                    "from_note_id": str(row["from_note_id"]),
+                    "to_note_id": str(row["to_note_id"]),
+                    "relation_type": str(row["relation_type"]),
+                    "direction": str(row["direction"]),
+                    "confidence": float(row["confidence"] or 1.0),
+                    "source_id": row["source_id"],
+                }
+                relation_path = [*path, edge]
+                score = 1.0
+                for index, item in enumerate(relation_path, start=1):
+                    score *= float(item["confidence"]) * (0.7 if index > 1 else 0.85)
+                expanded.append({"note_id": neighbor_id, "title": row["neighbor_title"], "entity_type": row["entity_type"], "status": row["status"], "markdown_path": row["markdown_path"], "hop": hop, "relation_score": score, "relation_path": relation_path})
+                visited.add(neighbor_id)
+                next_frontier.append((neighbor_id, relation_path))
+                if len(expanded) >= max_nodes:
+                    return expanded
+        frontier = next_frontier
+        if not frontier:
+            break
+    return expanded
+
+
+def create_job(
+    job_type: str,
+    target_id: str | None,
+    input_data: dict[str, Any] | None = None,
+    *,
+    profile_id: str | None = None,
+    max_attempts: int = 3,
+) -> str:
     job_id = f"job_{new_id().replace('-', '')}"
     with connect() as connection:
         connection.execute(
             """
             INSERT INTO knowledge_jobs
-            (id, job_type, target_id, status, input_json, created_at)
-            VALUES (?, ?, ?, 'queued', ?, ?)
+            (id, job_type, target_id, status, input_json, profile_id, max_attempts, created_at, updated_at)
+            VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)
             """,
-            (job_id, job_type, target_id, json.dumps(input_data or {}, ensure_ascii=False), now_iso()),
+            (job_id, job_type, target_id, json.dumps(input_data or {}, ensure_ascii=False), profile_id or active_profile_id(), max_attempts, now_iso(), now_iso()),
         )
     return job_id
 
@@ -451,11 +521,11 @@ def update_job(
     error_message: str | None = None,
 ) -> None:
     started_at = now_iso() if status == "running" else None
-    finished_at = now_iso() if status in {"committed", "proposed", "failed", "rejected"} else None
+    finished_at = now_iso() if status in {"committed", "proposed", "failed", "rejected", "completed", "cancelled"} else None
     with connect() as connection:
         connection.execute(
             """
-            UPDATE knowledge_jobs SET status = ?, attempt_count = attempt_count + ?,
+            UPDATE knowledge_jobs SET status = ?, attempt_count = attempt_count + ?, updated_at=?,
               result_json = ?, error_code = ?, error_message = ?,
               started_at = COALESCE(started_at, ?), finished_at = ?
             WHERE id = ?
@@ -463,6 +533,7 @@ def update_job(
             (
                 status,
                 1 if status == "running" else 0,
+                now_iso(),
                 json.dumps(result, ensure_ascii=False) if result is not None else None,
                 error_code,
                 error_message,
@@ -473,22 +544,95 @@ def update_job(
         )
 
 
+def get_job(job_id: str) -> dict[str, Any] | None:
+    with connect() as connection:
+        row = connection.execute("SELECT * FROM knowledge_jobs WHERE id=?", (job_id,)).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    item["input"] = json.loads(item.get("input_json") or "{}")
+    item["result"] = json.loads(item.get("result_json") or "null")
+    return item
+
+
+def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
+    with connect() as connection:
+        rows = connection.execute(
+            "SELECT * FROM knowledge_jobs WHERE profile_id=? ORDER BY created_at DESC LIMIT ?",
+            (active_profile_id(), limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_job_progress(job_id: str, progress: int) -> None:
+    with connect() as connection:
+        connection.execute(
+            "UPDATE knowledge_jobs SET progress=?, updated_at=? WHERE id=?",
+            (max(0, min(100, progress)), now_iso(), job_id),
+        )
+
+
+def request_job_cancel(job_id: str) -> bool:
+    with connect() as connection:
+        cursor = connection.execute(
+            "UPDATE knowledge_jobs SET cancel_requested=1, updated_at=? "
+            "WHERE id=? AND status IN ('queued','running')",
+            (now_iso(), job_id),
+        )
+    return cursor.rowcount > 0
+
+
+def reset_job_for_retry(job_id: str) -> bool:
+    with connect() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE knowledge_jobs SET status='queued', progress=0, cancel_requested=0,
+              result_json=NULL, error_code=NULL, error_message=NULL, started_at=NULL,
+              finished_at=NULL, updated_at=?
+            WHERE id=? AND status IN ('failed','cancelled') AND attempt_count < max_attempts
+            """,
+            (now_iso(), job_id),
+        )
+    return cursor.rowcount > 0
+
+
+def add_job_event(job_id: str, event_type: str, progress: int, message: str, payload: dict | None = None) -> dict[str, Any]:
+    event_id = f"kje_{new_id().replace('-', '')}"
+    created = now_iso()
+    with connect() as connection:
+        connection.execute(
+            "INSERT INTO knowledge_job_events(id, job_id, event_type, progress, message, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (event_id, job_id, event_type, progress, message, json.dumps(payload or {}, ensure_ascii=False), created),
+        )
+    return {"id": event_id, "job_id": job_id, "event_type": event_type, "progress": progress, "message": message, "payload": payload or {}, "created_at": created}
+
+
+def list_job_events(job_id: str) -> list[dict[str, Any]]:
+    with connect() as connection:
+        rows = connection.execute("SELECT * FROM knowledge_job_events WHERE job_id=? ORDER BY created_at", (job_id,)).fetchall()
+    return [{**dict(row), "payload": json.loads(row["payload_json"] or "{}")} for row in rows]
+
+
 def create_proposal(
     *,
     job_id: str,
     operation: str,
     target_note_id: str | None,
     proposal_path: str,
+    base_note_sha256: str | None = None,
+    base_snapshot_id: str | None = None,
 ) -> str:
     proposal_id = f"prop_{new_id().replace('-', '')}"
     with connect() as connection:
         connection.execute(
             """
             INSERT INTO knowledge_proposals
-            (id, job_id, operation, target_note_id, proposal_path, status, created_at)
-            VALUES (?, ?, ?, ?, ?, 'pending', ?)
+            (id, job_id, operation, target_note_id, proposal_path, base_note_sha256,
+             base_snapshot_id, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
             """,
-            (proposal_id, job_id, operation, target_note_id, proposal_path, now_iso()),
+            (proposal_id, job_id, operation, target_note_id, proposal_path,
+             base_note_sha256, base_snapshot_id, now_iso()),
         )
     return proposal_id
 
@@ -548,6 +692,40 @@ def source_has_pending_proposals(source_id: str) -> bool:
             (source_id,),
         ).fetchone()
     return row is not None
+
+
+def recover_interrupted_jobs() -> dict[str, Any]:
+    """Make jobs left running by a dead process replayable without duplicating proposals."""
+    with connect() as connection:
+        proposed = connection.execute(
+            """
+            UPDATE knowledge_jobs SET status='proposed', finished_at=?,
+              error_code='KNOWLEDGE_PROCESS_INTERRUPTED',
+              error_message='Recovered after process interruption; pending proposal retained.'
+            WHERE status='running' AND EXISTS (
+              SELECT 1 FROM knowledge_proposals p
+              WHERE p.job_id=knowledge_jobs.id AND p.status='pending'
+            )
+            """,
+            (now_iso(),),
+        ).rowcount
+        queued = connection.execute(
+            """
+            UPDATE knowledge_jobs SET status='queued', started_at=NULL, finished_at=NULL,
+              error_code='KNOWLEDGE_PROCESS_INTERRUPTED',
+              error_message='Recovered after process interruption and queued for retry.'
+            WHERE status='running'
+            """
+        ).rowcount
+        rows = connection.execute(
+            "SELECT id, target_id, job_type, input_json, profile_id FROM knowledge_jobs "
+            "WHERE status='queued' ORDER BY created_at"
+        ).fetchall()
+    return {
+        "queued": queued,
+        "proposed": proposed,
+        "jobs": [dict(row) for row in rows],
+    }
 
 
 def knowledge_counts() -> dict[str, int]:

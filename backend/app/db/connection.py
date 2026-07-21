@@ -3,22 +3,61 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from threading import Condition, RLock
 
 from backend.app.core.paths import db_path, ensure_data_dirs
 
 
+_database_gate = Condition(RLock())
+_active_connections = 0
+_exclusive_access = False
+
+
+@contextmanager
+def exclusive_database_access() -> Iterator[None]:
+    """Block new app connections and wait until existing ones are closed.
+
+    Database restore uses this process-local barrier before copying pages into the
+    live SQLite database. It avoids replacing a file that is still referenced by
+    another request (notably unsafe on Windows and with stale inodes on POSIX).
+    """
+    global _exclusive_access
+    with _database_gate:
+        while _exclusive_access:
+            _database_gate.wait()
+        _exclusive_access = True
+        while _active_connections:
+            _database_gate.wait()
+    try:
+        yield
+    finally:
+        with _database_gate:
+            _exclusive_access = False
+            _database_gate.notify_all()
+
+
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
+    global _active_connections
     ensure_data_dirs()
-    connection = sqlite3.connect(db_path())
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    connection.execute("PRAGMA busy_timeout = 5000")
+    with _database_gate:
+        while _exclusive_access:
+            _database_gate.wait()
+        _active_connections += 1
+    connection: sqlite3.Connection | None = None
     try:
+        connection = sqlite3.connect(db_path(), timeout=30.0)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 30000")
         yield connection
         connection.commit()
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
+        with _database_gate:
+            _active_connections -= 1
+            _database_gate.notify_all()
 
 
 def init_db() -> None:
@@ -242,12 +281,32 @@ def init_db() -> None:
               finished_at TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS knowledge_job_events (
+              id TEXT PRIMARY KEY,
+              job_id TEXT NOT NULL,
+              event_type TEXT NOT NULL,
+              progress INTEGER NOT NULL,
+              message TEXT NOT NULL,
+              payload_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(job_id) REFERENCES knowledge_jobs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_locks (
+              resource_key TEXT PRIMARY KEY,
+              owner_id TEXT NOT NULL,
+              acquired_at TEXT NOT NULL,
+              expires_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS knowledge_proposals (
               id TEXT PRIMARY KEY,
               job_id TEXT NOT NULL,
               operation TEXT NOT NULL,
               target_note_id TEXT,
               proposal_path TEXT NOT NULL,
+              base_note_sha256 TEXT,
+              base_snapshot_id TEXT,
               status TEXT NOT NULL,
               created_at TEXT NOT NULL,
               resolved_at TEXT,
@@ -272,6 +331,40 @@ def init_db() -> None:
         }
         if "last_changed_at" not in watch_columns:
             connection.execute("ALTER TABLE knowledge_web_watches ADD COLUMN last_changed_at TEXT")
+        proposal_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(knowledge_proposals)").fetchall()
+        }
+        if "base_note_sha256" not in proposal_columns:
+            connection.execute("ALTER TABLE knowledge_proposals ADD COLUMN base_note_sha256 TEXT")
+        if "base_snapshot_id" not in proposal_columns:
+            connection.execute("ALTER TABLE knowledge_proposals ADD COLUMN base_snapshot_id TEXT")
+        for table in ("knowledge_notes", "knowledge_sources"):
+            columns = {
+                row["name"] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if "deleted_at" not in columns:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT")
+            if "previous_status" not in columns:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN previous_status TEXT")
+        job_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(knowledge_jobs)").fetchall()
+        }
+        for name, definition in {
+            "progress": "INTEGER NOT NULL DEFAULT 0",
+            "cancel_requested": "INTEGER NOT NULL DEFAULT 0",
+            "max_attempts": "INTEGER NOT NULL DEFAULT 3",
+            "profile_id": "TEXT",
+            "updated_at": "TEXT",
+        }.items():
+            if name not in job_columns:
+                connection.execute(f"ALTER TABLE knowledge_jobs ADD COLUMN {name} {definition}")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_status ON knowledge_jobs(status, created_at)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_proposals_target_status "
+            "ON knowledge_proposals(target_note_id, status)"
+        )
         connection.execute(
             """
             INSERT OR IGNORE INTO schema_migrations(version, name, applied_at)

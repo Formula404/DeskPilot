@@ -91,25 +91,9 @@ def update_managed_note(note_id: str, values: dict[str, Any]) -> dict[str, Any]:
 
 
 def delete_managed_note(note_id: str) -> dict[str, Any]:
-    note = get_note(note_id)
-    if not note:
-        raise KnowledgeNoteManagementError("知识页面不存在。")
-    path = from_knowledge_relative(str(note["markdown_path"]))
-    proposal_paths: list[Path] = []
-    with connect() as connection:
-        proposal_paths = [
-            from_knowledge_relative(str(row["proposal_path"]))
-            for row in connection.execute(
-                "SELECT proposal_path FROM knowledge_proposals WHERE target_note_id = ?",
-                (note_id,),
-            ).fetchall()
-        ]
-        connection.execute("DELETE FROM knowledge_proposals WHERE target_note_id = ?", (note_id,))
-        connection.execute("DELETE FROM knowledge_fts WHERE object_id = ?", (note_id,))
-        connection.execute("DELETE FROM knowledge_notes WHERE id = ?", (note_id,))
-    for proposal_path in proposal_paths:
-        proposal_path.unlink(missing_ok=True)
-    path.unlink(missing_ok=True)
-    refresh_catalogs()
-    append_log("delete", str(note["title"]), f"Deleted knowledge page {note_id}; source snapshots were retained.")
-    return {"id": note_id, "title": note["title"], "deleted": True}
+    from backend.app.knowledge.lifecycle import KnowledgeLifecycleError, trash_note
+
+    try:
+        return trash_note(note_id)
+    except KnowledgeLifecycleError as exc:
+        raise KnowledgeNoteManagementError(str(exc)) from exc

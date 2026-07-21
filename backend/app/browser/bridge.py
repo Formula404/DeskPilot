@@ -110,7 +110,7 @@ class BrowserBridge:
             payload={
                 "include_visible_text": True,
                 "include_dom_summary": True,
-                "max_text_chars": 30000,
+                "max_text_chars": 100000,
             },
             timeout=timeout,
         )

@@ -25,21 +25,21 @@ LangGraph 编排核心
 
 ## 技术栈
 
-| 层 | 技术 |
-|---|---|
-| 桌面壳 | Tauri |
-| 前端 | React + Vite + TypeScript + Tailwind CSS + shadcn/ui |
-| 状态管理 | Zustand |
-| 后端 | Python 3.12 + FastAPI |
-| 包管理 | uv |
-| Agent | LangGraph + OpenAI Tool Calling |
-| 模型 | OpenAI SDK |
-| 数据库 | SQLite + FTS5 |
-| 浏览器通道 | Chrome/Edge Manifest V3 扩展 + 本地 WebSocket/HTTP |
-| 浏览器自动化 | 扩展执行当前页轻量动作 + Playwright 受控浏览器 |
-| Windows 自动化 | pywin32 + pywinauto |
-| RPA 视觉 | mss + opencv-python + PaddleOCR |
-| 实时事件 | SSE |
+| 层             | 技术                                                 |
+| -------------- | ---------------------------------------------------- |
+| 桌面壳         | Tauri                                                |
+| 前端           | React + Vite + TypeScript + Tailwind CSS + shadcn/ui |
+| 状态管理       | Zustand                                              |
+| 后端           | Python 3.12 + FastAPI                                |
+| 包管理         | uv                                                   |
+| Agent          | LangGraph + OpenAI Tool Calling                      |
+| 模型           | OpenAI SDK                                           |
+| 数据库         | SQLite + FTS5                                        |
+| 浏览器通道     | Chrome/Edge Manifest V3 扩展 + 本地 WebSocket/HTTP   |
+| 浏览器自动化   | 扩展执行当前页轻量动作 + Playwright 受控浏览器       |
+| Windows 自动化 | pywin32 + pywinauto                                  |
+| RPA 视觉       | mss + opencv-python + PaddleOCR                      |
+| 实时事件       | SSE                                                  |
 
 ## 快速开始
 
@@ -55,7 +55,7 @@ cd frontend && npm install
 npm run dev
 
 # Tauri 桌面窗口预览（开发时会拉起原生桌面壳）
-npm run tauri -- dev
+cd frontend && npm run tauri -- dev
 
 # 浏览器扩展
 cd browser-extension && npm install && npm run build
@@ -117,14 +117,14 @@ npm run tauri -- dev
 
 ## 开发路线
 
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| 0 | 项目骨架 — 前后端工程、Tool Calling Agent、Tool Registry | 进行中 |
-| 1 | 悬浮窗 + 当前窗口识别 | 待开始 |
-| 2 | 网页操作闭环（总结、表格导出） | 待开始 |
-| 3 | 桌面应用 + 基础 RPA（网易云音乐） | 待开始 |
-| 4 | 微信 RPA 可见内容采集 | 待开始 |
-| 5 | 开发者插件化 | 待开始 |
+| 阶段 | 内容                                                      | 状态   |
+| ---- | --------------------------------------------------------- | ------ |
+| 0    | 项目骨架 — 前后端工程、Tool Calling Agent、Tool Registry | 进行中 |
+| 1    | 悬浮窗 + 当前窗口识别                                     | 待开始 |
+| 2    | 网页操作闭环（总结、表格导出）                            | 待开始 |
+| 3    | 桌面应用 + 基础 RPA（网易云音乐）                         | 待开始 |
+| 4    | 微信 RPA 可见内容采集                                     | 待开始 |
+| 5    | 开发者插件化                                              | 待开始 |
 
 ## 第一阶段验收链路
 

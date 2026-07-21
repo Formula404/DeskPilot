@@ -37,6 +37,7 @@ from backend.app.knowledge.repository import (
     create_proposal,
     find_note_by_title,
     get_note,
+    get_job,
     get_proposal,
     get_snapshot,
     get_source,
@@ -51,6 +52,8 @@ from backend.app.knowledge.repository import (
 )
 from backend.app.knowledge.settings import get_knowledge_settings
 from backend.app.knowledge.catalog import append_log, ensure_profile_workspace, refresh_catalogs
+from backend.app.knowledge.locking import KnowledgeLockBusy, knowledge_locks
+from backend.app.knowledge.profiles import active_profile_id, use_profile
 
 logger = logging.getLogger(__name__)
 
@@ -390,9 +393,18 @@ def _save_pending_proposal(
 ) -> dict[str, Any]:
     proposal_file_id = f"proposal_{new_id().replace('-', '')}"
     path = knowledge_root() / "proposals" / "pending" / f"{proposal_file_id}.json"
+    target_note = get_note(str(operation.target_note_id)) if operation.target_note_id else None
+    base_note_sha256 = target_note.get("content_sha256") if target_note else None
+    if target_note and (not isinstance(base_note_sha256, str) or not base_note_sha256):
+        raise KnowledgeCompileError(
+            "目标页面缺少有效内容哈希，无法创建可安全审核的提案。",
+            "KNOWLEDGE_NOTE_HASH_INVALID",
+        )
     payload = {
         "source_id": source_id,
         "snapshot_id": snapshot_id,
+        "base_note_sha256": base_note_sha256,
+        "base_snapshot_id": snapshot_id,
         "operation": operation.model_dump(mode="json"),
     }
     atomic_write(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
@@ -401,6 +413,8 @@ def _save_pending_proposal(
         operation=operation.operation,
         target_note_id=operation.target_note_id,
         proposal_path=relative_to_knowledge(path),
+        base_note_sha256=base_note_sha256,
+        base_snapshot_id=snapshot_id,
     )
     return {"proposal_id": proposal_id, "status": "pending", "path": relative_to_knowledge(path)}
 
@@ -423,7 +437,12 @@ def _commit_relation_operation(operation: ProposalOperation, source_id: str) -> 
     return {"note_id": note["id"], "title": note["title"], "status": "committed", "operation": operation.operation}
 
 
-async def compile_source(source_id: str, target_note_id: str | None = None) -> dict[str, Any]:
+async def _compile_source_locked(
+    source_id: str,
+    target_note_id: str | None = None,
+    *,
+    resume_job_id: str | None = None,
+) -> dict[str, Any]:
     source = get_source(source_id)
     if not source:
         raise KnowledgeCompileError("知识来源不存在。", "KNOWLEDGE_SOURCE_NOT_FOUND")
@@ -447,10 +466,23 @@ async def compile_source(source_id: str, target_note_id: str | None = None) -> d
             with connect() as connection:
                 job = connection.execute("SELECT target_id FROM knowledge_jobs WHERE id=?", (item["job_id"],)).fetchone()
             if job and job["target_id"] == source_id:
-                return {"job_id": item["job_id"], "source_id": source_id, "committed": [], "pending": [{"proposal_id": item["id"], "status": "pending", "path": item["proposal_path"]}], "fallback_used": False, "already_pending": True}
+                result_job_id = resume_job_id or str(item["job_id"])
+                result = {"job_id": result_job_id, "source_id": source_id, "committed": [], "pending": [{"proposal_id": item["id"], "status": "pending", "path": item["proposal_path"]}], "fallback_used": False, "already_pending": True, "existing_proposal_job_id": str(item["job_id"])}
+                if resume_job_id:
+                    update_job(resume_job_id, status="proposed", result=result)
+                return result
 
-    job_id = create_job("compile", source_id, {"snapshot_id": snapshot["id"]})
-    update_job(job_id, status="running")
+    job_id = resume_job_id or create_job(
+        "compile",
+        source_id,
+        {
+            "snapshot_id": snapshot["id"],
+            "target_note_id": target_note_id,
+            "profile_id": active_profile_id(),
+        },
+    )
+    if not resume_job_id or (get_job(job_id) or {}).get("status") != "running":
+        update_job(job_id, status="running")
     fallback_used = False
     try:
         proposal = await _model_proposal(source, snapshot, chunks, target_note)
@@ -509,7 +541,25 @@ async def compile_source(source_id: str, target_note_id: str | None = None) -> d
         raise
 
 
-def review_proposal(proposal_id: str, decision: str) -> dict[str, Any]:
+async def compile_source(
+    source_id: str,
+    target_note_id: str | None = None,
+    *,
+    resume_job_id: str | None = None,
+) -> dict[str, Any]:
+    keys = [f"source:{source_id}:compile"]
+    if target_note_id:
+        keys.append(f"note:{target_note_id}:write")
+    try:
+        with knowledge_locks(keys, owner_id=resume_job_id):
+            return await _compile_source_locked(
+                source_id, target_note_id, resume_job_id=resume_job_id
+            )
+    except KnowledgeLockBusy as exc:
+        raise KnowledgeCompileError(str(exc), exc.code) from exc
+
+
+def _review_proposal_locked(proposal_id: str, decision: str, *, force: bool = False) -> dict[str, Any]:
     proposal = get_proposal(proposal_id)
     if not proposal:
         raise KnowledgeCompileError("知识提案不存在。", "KNOWLEDGE_PROPOSAL_NOT_FOUND")
@@ -541,14 +591,70 @@ def review_proposal(proposal_id: str, decision: str) -> dict[str, Any]:
     snapshot = get_snapshot(str(payload["snapshot_id"]))
     if not source or not snapshot:
         raise KnowledgeCompileError("提案关联的来源已不存在。", "KNOWLEDGE_SOURCE_NOT_FOUND")
+    base_snapshot_id = str(
+        proposal.get("base_snapshot_id") or payload.get("base_snapshot_id") or payload["snapshot_id"]
+    )
+    if str(source.get("current_snapshot_id")) != base_snapshot_id:
+        raise KnowledgeCompileError(
+            "来源已产生更新快照，此提案已过期，请重新编译。",
+            "KNOWLEDGE_PROPOSAL_SOURCE_STALE",
+        )
+    if operation.target_note_id:
+        current_note = get_note(str(operation.target_note_id))
+        base_hash = proposal.get("base_note_sha256") or payload.get("base_note_sha256")
+        if not current_note:
+            raise KnowledgeCompileError("提案目标页面已不存在。", "KNOWLEDGE_NOTE_NOT_FOUND")
+        if (not isinstance(base_hash, str) or not base_hash or current_note.get("content_sha256") != base_hash) and not force:
+            raise KnowledgeCompileError(
+                "目标页面在提案生成后已被修改；为避免覆盖新内容，请重新编译。",
+                "KNOWLEDGE_PROPOSAL_BASE_MISMATCH",
+            )
     result = (_commit_note(operation, source, snapshot) if operation.operation in {"create_note", "update_note"} else _commit_relation_operation(operation, str(source["id"])))
     resolve_proposal(proposal_id, "accepted")
     source_path.unlink(missing_ok=True)
     if not source_has_pending_proposals(str(source["id"])):
         update_source(str(source["id"]), status="active")
     refresh_catalogs()
-    append_log("review", str(result.get("title") or proposal_id), f"Accepted proposal {proposal_id}")
-    return {"proposal_id": proposal_id, "status": "accepted", "note": result}
+    append_log("review", str(result.get("title") or proposal_id), f"Accepted proposal {proposal_id}; force: {force}")
+    return {"proposal_id": proposal_id, "status": "accepted", "note": result, "forced": force}
+
+
+def review_proposal(proposal_id: str, decision: str, *, force: bool = False) -> dict[str, Any]:
+    proposal = get_proposal(proposal_id)
+    keys = [f"proposal:{proposal_id}:resolve"]
+    if proposal and proposal.get("target_note_id"):
+        keys.append(f"note:{proposal['target_note_id']}:write")
+    try:
+        with knowledge_locks(keys):
+            return _review_proposal_locked(proposal_id, decision, force=force)
+    except KnowledgeLockBusy as exc:
+        raise KnowledgeCompileError(str(exc), exc.code) from exc
+
+
+async def resume_interrupted_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replay compile jobs recovered during startup in their original profile context."""
+    results: list[dict[str, Any]] = []
+    for job in jobs:
+        try:
+            input_data = json.loads(job.get("input_json") or "{}")
+            profile_id = str(input_data.get("profile_id") or active_profile_id())
+            with use_profile(profile_id):
+                result = await compile_source(
+                    str(job["target_id"]),
+                    input_data.get("target_note_id"),
+                    resume_job_id=str(job["id"]),
+                )
+            results.append({"job_id": job["id"], "status": "recovered", "result": result})
+        except Exception as exc:
+            logger.exception("Failed to resume interrupted knowledge job", extra={"job_id": job.get("id")})
+            update_job(
+                str(job["id"]),
+                status="failed",
+                error_code=getattr(exc, "code", "KNOWLEDGE_RECOVERY_FAILED"),
+                error_message=str(exc),
+            )
+            results.append({"job_id": job.get("id"), "status": "failed", "error": str(exc)})
+    return results
 
 
 def promote_answer(title: str, answer: str, note_ids: list[str]) -> dict[str, Any]:
