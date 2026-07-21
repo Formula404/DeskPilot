@@ -39,9 +39,9 @@
       },
       {
         "label": "overlay",
-        "title": "",
-        "width": 1200,
-        "height": 800,
+        "title": "DeskPilot",
+        "width": 430,
+        "height": 188,
         "alwaysOnTop": true,
         "resizable": false,
         "decorations": false,

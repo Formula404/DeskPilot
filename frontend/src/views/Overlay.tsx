@@ -1,5 +1,23 @@
 import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Copy, FileText, LayoutGrid } from "lucide-react";
+import { Window } from "@tauri-apps/api/window";
+import {
+  BookOpen,
+  Bot,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  CircleStop,
+  CircleX,
+  Copy,
+  FileText,
+  Globe2,
+  LayoutGrid,
+  LoaderCircle,
+  Minus,
+  Sparkles,
+  X
+} from "lucide-react";
+import deskpilotWhiteIcon from "../assets/deskpilot-white.png";
 import { cancelTask, createTask, openEventStream } from "../api/client";
 import type { TaskEvent } from "../types/api";
 import type { SuggestedAction, OverlayMode } from "../types/window";
@@ -11,44 +29,49 @@ import { useWindowLifecycle } from "../hooks/useWindowLifecycle";
 import { CommandComposer } from "./CommandComposer";
 import { TaskExecutionPanel } from "./TaskPanel";
 import { isVisibleTaskStep } from "./taskStatus";
-import { hideCurrentWindow, isTauriRuntime } from "./windowActions";
+import {
+  hideCurrentWindow,
+  isTauriRuntime,
+  setOverlayWindowShape,
+  type OverlayShape
+} from "./windowActions";
 
 const suggestedActions: SuggestedAction[] = [
-  {
-    id: "summarize",
-    label: "总结当前网页",
-    prompt: "总结当前网页并保存为 Markdown",
-    icon: FileText
-  },
-  {
-    id: "table",
-    label: "提取表格",
-    prompt: "提取当前网页中的表格并保存为 Excel",
-    icon: LayoutGrid
-  },
-  {
-    id: "markdown",
-    label: "保存为 Markdown",
-    prompt: "把当前网页整理成 Markdown 笔记",
-    icon: Copy
-  },
-  {
-    id: "translate",
-    label: "翻译页面",
-    prompt: "翻译当前页面的主要内容",
-    icon: Bot
-  }
+  { id: "summarize", label: "总结网页", prompt: "总结当前网页并保存为 Markdown", icon: FileText },
+  { id: "table", label: "提取表格", prompt: "提取当前网页中的表格并保存为 Excel", icon: LayoutGrid },
+  { id: "markdown", label: "保存笔记", prompt: "把当前网页整理成 Markdown 笔记", icon: Copy },
+  { id: "translate", label: "翻译页面", prompt: "翻译当前页面的主要内容", icon: Bot }
 ];
+
+function extractFinalResponse(events: TaskEvent[]) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const step = events[index].payload?.step;
+    if (!step || typeof step !== "object" || !("output" in step)) continue;
+    const output = (step as { output?: unknown }).output;
+    if (!output || typeof output !== "object" || !("final_response" in output)) continue;
+    const response = (output as { final_response?: unknown }).final_response;
+    if (typeof response === "string" && response.trim()) return response.trim();
+  }
+  return "";
+}
+
+function latestStepLabel(events: TaskEvent[]) {
+  const visible = events.filter(isVisibleTaskStep);
+  return visible[visible.length - 1]?.message ?? "正在准备任务";
+}
 
 export function OverlayView() {
   const rootRef = useRef<HTMLElement | null>(null);
-  const ignoreBlurUntilRef = useRef(0);
+  const panelRef = useRef<HTMLElement | null>(null);
   const openTimelineRef = useRef<gsap.core.Timeline | null>(null);
   const streamErrorTimerRef = useRef<number | null>(null);
+  const [shape, setShape] = useState<OverlayShape>("quick");
   const [message, setMessage] = useState("");
+  const [lastUserMessage, setLastUserMessage] = useState("");
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [stepsExpanded, setStepsExpanded] = useState(true);
   const [composerSignal, setComposerSignal] = useState<"idle" | "submit" | "error">("idle");
   const reduceMotion = useReducedMotion();
   const { events, addEvent, clearEvents, currentTaskId, setCurrentTaskId } = useTaskStore();
@@ -56,10 +79,11 @@ export function OverlayView() {
     () => events.filter((event) => !currentTaskId || event.task_id === currentTaskId || event.task_id === null),
     [currentTaskId, events]
   );
-  const hasVisibleTaskSteps = useMemo(
-    () => currentTaskEvents.some(isVisibleTaskStep),
+  const visibleStepCount = useMemo(
+    () => currentTaskEvents.filter(isVisibleTaskStep).length,
     [currentTaskEvents]
   );
+  const finalResponse = useMemo(() => extractFinalResponse(currentTaskEvents), [currentTaskEvents]);
   const mode = useMemo<OverlayMode>(() => {
     if (isCreatingTask) return "creating";
     if (currentTaskEvents.some((event) => event.type === "task.failed")) return "failed";
@@ -68,264 +92,129 @@ export function OverlayView() {
     if (currentTaskId) return "running";
     return "idle";
   }, [currentTaskEvents, currentTaskId, isCreatingTask]);
+  const running = mode === "running" || mode === "creating";
 
-  const playOverlayOpenMotion = useCallback(() => {
-    if (openTimelineRef.current?.isActive()) {
-      return;
-    }
-    ignoreBlurUntilRef.current = Date.now() + 1200;
-    const overlay = rootRef.current;
-    const gradient = rootRef.current?.querySelector("[data-motion='overlay-gradient']");
-    const scanBeam = rootRef.current?.querySelector("[data-motion='overlay-scan-beam']");
-    const suggestions = rootRef.current?.querySelectorAll("[data-motion='suggestion-item']");
-    const composer = rootRef.current?.querySelector("[data-motion='command-composer']");
-    const spark = rootRef.current?.querySelector("[data-motion='composer-spark']");
-
-    if (!overlay || !gradient || !scanBeam || !composer) {
-      return;
-    }
-
-    const suggestionItems = Array.from(suggestions ?? []);
-    const composerRect = composer.getBoundingClientRect();
-    const composerStartY = Math.max(72, window.innerHeight - composerRect.top + 24);
-    const targets = [
-      overlay,
-      gradient,
-      scanBeam,
-      composer,
-      ...(spark ? [spark] : []),
-      ...suggestionItems
-    ];
-    gsap.killTweensOf(targets);
+  const playOpenMotion = useCallback(() => {
+    const panel = panelRef.current;
+    if (!panel || openTimelineRef.current?.isActive()) return;
+    const children = panel.querySelectorAll("[data-motion='panel-item']");
+    gsap.killTweensOf([panel, ...Array.from(children)]);
     openTimelineRef.current?.kill();
-    gsap.set(overlay, { autoAlpha: 1, x: 0, y: 0, scale: 1, clearProps: "visibility" });
-    gsap.set(gradient, { autoAlpha: 0, x: 0, y: 18, scale: 1, clearProps: "visibility" });
-    gsap.set(scanBeam, {
-      autoAlpha: 0,
-      x: 0,
-      y: 0,
-      yPercent: 58,
-      scaleY: 1,
-      transformOrigin: "50% 100%",
-      clearProps: "visibility"
-    });
-    gsap.set(composer, {
-      autoAlpha: 0,
-      x: 0,
-      y: composerStartY,
-      scale: 0.985,
-      transformOrigin: "50% 100%",
-      clearProps: "visibility"
-    });
-    gsap.set(suggestionItems, {
-      autoAlpha: 0,
-      x: 0,
-      y: 22,
-      scale: 0.82,
-      transformOrigin: "50% 100%",
-      clearProps: "visibility"
-    });
-    gsap.set(spark ?? [], { autoAlpha: 0, rotation: -16, scale: 0.78, clearProps: "visibility" });
-
     openTimelineRef.current = gsap.timeline({
       defaults: { ease: motion.ease.out },
       onComplete: () => {
         openTimelineRef.current = null;
       }
     })
-      .fromTo(gradient, {
+      .fromTo(panel, {
         autoAlpha: 0,
-        y: 18,
+        y: 12,
+        scale: 0.965,
+        transformOrigin: "right bottom"
       }, {
         autoAlpha: 1,
         y: 0,
-        duration: getMotionDuration(0.32, reduceMotion)
-      }, 0)
-      .fromTo(scanBeam, {
-        autoAlpha: reduceMotion ? 0 : 0.18,
-        yPercent: 58,
-        scaleY: 1
-      }, {
-        autoAlpha: reduceMotion ? 0 : 0.86,
-        yPercent: -62,
-        scaleY: 1,
-        duration: getMotionDuration(0.92, reduceMotion),
-        ease: "power2.out"
-      }, 0)
-      .to(scanBeam, {
+        scale: 1,
+        duration: getMotionDuration(0.22, reduceMotion)
+      })
+      .from(children, {
         autoAlpha: 0,
-        duration: getMotionDuration(0.18, reduceMotion),
-        ease: "power1.out"
-      }, 0.78)
-      .to(composer, {
-        autoAlpha: 1,
-        y: 0,
-        scale: 1,
-        duration: getMotionDuration(0.42, reduceMotion),
-        ease: "power3.out"
-      }, 0)
-      .to(spark ?? [], {
-        autoAlpha: 1,
-        rotation: 0,
-        scale: 1,
+        y: 5,
         duration: getMotionDuration(0.16, reduceMotion),
-        ease: "back.out(1.45)"
-      }, 0.28)
-      .to(suggestionItems, {
-        autoAlpha: 1,
-        y: 0,
-        scale: 1,
-        duration: getMotionDuration(0.24, reduceMotion),
-        stagger: reduceMotion ? 0 : 0.042,
-        ease: "back.out(1.65)"
-      }, 0.34);
+        stagger: reduceMotion ? 0 : 0.025
+      }, "<0.05");
   }, [reduceMotion]);
-
-  const resetOverlayMotionTargets = useCallback(() => {
-    const overlay = rootRef.current;
-    const panel = rootRef.current?.querySelector("[data-motion='task-panel']");
-    const suggestions = rootRef.current?.querySelectorAll("[data-motion='suggestion-item']");
-    const composer = rootRef.current?.querySelector("[data-motion='command-composer']");
-    const gradient = rootRef.current?.querySelector("[data-motion='overlay-gradient']");
-    const scanBeam = rootRef.current?.querySelector("[data-motion='overlay-scan-beam']");
-    const spark = rootRef.current?.querySelector("[data-motion='composer-spark']");
-    const hiddenTargets = [
-      ...(composer ? [composer] : []),
-      ...(gradient ? [gradient] : []),
-      ...(scanBeam ? [scanBeam] : []),
-      ...(spark ? [spark] : []),
-      ...Array.from(suggestions ?? [])
-    ];
-    const visibleTargets = [
-      ...(overlay ? [overlay] : [])
-    ];
-
-    gsap.killTweensOf([...visibleTargets, ...(panel ? [panel] : []), ...hiddenTargets]);
-    openTimelineRef.current?.kill();
-    openTimelineRef.current = null;
-    gsap.set(visibleTargets, {
-      autoAlpha: 1,
-      x: 0,
-      y: 0,
-      yPercent: 0,
-      scale: 1,
-      scaleY: 1,
-      rotation: 0,
-      clearProps: "visibility"
-    });
-    gsap.set(panel ?? [], {
-      autoAlpha: 1,
-      x: 0,
-      y: 0,
-      scale: 1,
-      scaleY: 1,
-      rotation: 0,
-      clearProps: "visibility"
-    });
-    gsap.set(hiddenTargets, {
-      autoAlpha: 0,
-      x: 0,
-      y: 0,
-      yPercent: 0,
-      scale: 1,
-      scaleY: 1,
-      rotation: 0
-    });
-  }, []);
 
   useGSAP(() => {
     if (isTauriRuntime()) {
-      resetOverlayMotionTargets();
-      return () => {
-        openTimelineRef.current?.kill();
-        openTimelineRef.current = null;
-      };
+      gsap.set(panelRef.current, {
+        autoAlpha: 0,
+        y: 12,
+        scale: 0.965,
+        transformOrigin: "50% 100%"
+      });
+      return () => openTimelineRef.current?.kill();
     }
-    playOverlayOpenMotion();
+    playOpenMotion();
+    return () => openTimelineRef.current?.kill();
+  }, { dependencies: [playOpenMotion], scope: rootRef });
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    Window.getCurrent().listen("overlay-open-request", () => {
+      setShape("quick");
+      window.requestAnimationFrame(() => playOpenMotion());
+    }).then((nextUnlisten) => {
+      if (disposed) {
+        nextUnlisten();
+      } else {
+        unlisten = nextUnlisten;
+      }
+    }).catch((error) => {
+      console.warn("Failed to listen for overlay open requests", error);
+    });
     return () => {
-      openTimelineRef.current?.kill();
-      openTimelineRef.current = null;
+      disposed = true;
+      unlisten?.();
     };
-  }, { dependencies: [playOverlayOpenMotion, resetOverlayMotionTargets], scope: rootRef });
+  }, [playOpenMotion]);
 
   useGSAP(() => {
-    const statusMessage = rootRef.current?.querySelector("[data-motion='status-message']");
-    if (!statusMessage || (!actionError && !streamError)) {
-      return;
-    }
-    gsap.fromTo(statusMessage, {
-      autoAlpha: 0,
-      y: 8
+    const content = shape === "hud"
+      ? panelRef.current?.querySelectorAll(".assistant-hud-state, .assistant-hud-copy, .assistant-hud-actions")
+      : panelRef.current?.querySelector(".assistant-quick-body, .assistant-conversation");
+    if (!content || (content instanceof NodeList && !content.length)) return;
+    gsap.fromTo(content, {
+      autoAlpha: 0.7,
+      y: shape === "conversation" ? 6 : -3
     }, {
       autoAlpha: 1,
       y: 0,
-      duration: getMotionDuration(motion.duration.base, reduceMotion),
-      ease: motion.ease.out
+      duration: getMotionDuration(0.16, reduceMotion),
+      ease: "power3.out",
+      immediateRender: false,
+      clearProps: "transform,opacity,visibility"
     });
-  }, { dependencies: [actionError, streamError, reduceMotion], scope: rootRef });
+  }, { dependencies: [shape, reduceMotion], scope: rootRef });
+
+  useEffect(() => {
+    void setOverlayWindowShape(shape).catch((error) => {
+      console.warn("Failed to resize overlay window", error);
+    });
+  }, [shape]);
 
   const runCloseMotion = useCallback(() => new Promise<void>((resolve) => {
-    const panel = rootRef.current?.querySelector("[data-motion='task-panel']");
-    const suggestions = rootRef.current?.querySelectorAll("[data-motion='suggestion-item']");
-    const composer = rootRef.current?.querySelector("[data-motion='command-composer']");
-    const gradient = rootRef.current?.querySelector("[data-motion='overlay-gradient']");
-    const scanBeam = rootRef.current?.querySelector("[data-motion='overlay-scan-beam']");
-    const spark = rootRef.current?.querySelector("[data-motion='composer-spark']");
-    const suggestionItems = Array.from(suggestions ?? []);
-    const exitTargets = [
-      ...(composer ? [composer] : []),
-      ...(spark ? [spark] : []),
-      ...suggestionItems
-    ];
-    const animatedTargets = [
-      ...(panel ? [panel] : []),
-      ...(gradient ? [gradient] : []),
-      ...(scanBeam ? [scanBeam] : []),
-      ...exitTargets
-    ];
-
     openTimelineRef.current?.kill();
     openTimelineRef.current = null;
-    gsap.killTweensOf(animatedTargets);
-
-    gsap.timeline({
-      defaults: { ease: "power2.inOut" },
+    gsap.to(panelRef.current, {
+      autoAlpha: 0,
+      y: 8,
+      scale: 0.97,
+      duration: getMotionDuration(0.14, reduceMotion),
+      ease: "power2.in",
       onComplete: () => {
-        void hideCurrentWindow().then(resetOverlayMotionTargets).finally(resolve);
+        setShape("quick");
+        void hideCurrentWindow().finally(resolve);
       }
-    })
-      .to(panel ?? [], {
-        autoAlpha: 0,
-        y: 12,
-        duration: getMotionDuration(0.12, reduceMotion)
-      }, 0)
-      .to(exitTargets, {
-        autoAlpha: 0,
-        y: 18,
-        scale: 0.985,
-        duration: getMotionDuration(0.16, reduceMotion)
-      }, 0)
-      .to(gradient ?? [], {
-        autoAlpha: 0,
-        y: 10,
-        duration: getMotionDuration(0.16, reduceMotion)
-      }, 0)
-      .to(scanBeam ?? [], {
-        autoAlpha: 0,
-        y: 14,
-        duration: getMotionDuration(0.08, reduceMotion)
-      }, 0)
-      .to(rootRef.current, {
-        autoAlpha: 0,
-        duration: getMotionDuration(0.08, reduceMotion)
-      }, 0.08);
-  }), [reduceMotion, resetOverlayMotionTargets]);
+    });
+  }), [reduceMotion]);
 
-  const { closeWindow: closeOverlayWithMotion } = useWindowLifecycle({
-    onOpen: playOverlayOpenMotion,
+  const ensureOpenMotion = useCallback(() => {
+    const panel = panelRef.current;
+    if (!panel || openTimelineRef.current?.isActive()) return;
+    const opacity = Number(gsap.getProperty(panel, "opacity"));
+    if (opacity < 0.05 || window.getComputedStyle(panel).visibility === "hidden") {
+      playOpenMotion();
+    }
+  }, [playOpenMotion]);
+
+  const { closeWindow } = useWindowLifecycle({
+    onOpen: ensureOpenMotion,
     onClose: runCloseMotion,
-    closeOnBlur: true,
-    shouldIgnoreClose: (reason) => reason === "blur" && Date.now() < ignoreBlurUntilRef.current
+    closeOnBlur: false,
+    replayOnFocus: true
   });
 
   useEffect(() => {
@@ -335,26 +224,19 @@ export function OverlayView() {
         addEvent(event);
       },
       () => {
-        if (streamErrorTimerRef.current !== null) {
-          window.clearTimeout(streamErrorTimerRef.current);
-        }
+        if (streamErrorTimerRef.current !== null) window.clearTimeout(streamErrorTimerRef.current);
         streamErrorTimerRef.current = window.setTimeout(() => {
-          setStreamError("任务事件连接异常，请确认后端服务已在 127.0.0.1:8765 启动");
+          setStreamError("任务事件连接异常，请确认本地服务已启动");
         }, 1500);
       },
       () => {
-        if (streamErrorTimerRef.current !== null) {
-          window.clearTimeout(streamErrorTimerRef.current);
-          streamErrorTimerRef.current = null;
-        }
+        if (streamErrorTimerRef.current !== null) window.clearTimeout(streamErrorTimerRef.current);
+        streamErrorTimerRef.current = null;
         setStreamError(null);
       }
     );
     return () => {
-      if (streamErrorTimerRef.current !== null) {
-        window.clearTimeout(streamErrorTimerRef.current);
-        streamErrorTimerRef.current = null;
-      }
+      if (streamErrorTimerRef.current !== null) window.clearTimeout(streamErrorTimerRef.current);
       source.close();
     };
   }, [addEvent]);
@@ -368,6 +250,9 @@ export function OverlayView() {
       }
       return;
     }
+    setLastUserMessage(trimmed);
+    setShape("conversation");
+    setStepsExpanded(true);
     setComposerSignal("submit");
     window.setTimeout(() => setComposerSignal("idle"), 0);
     setIsCreatingTask(true);
@@ -393,98 +278,179 @@ export function OverlayView() {
   }
 
   async function stopTask() {
-    if (currentTaskId) {
-      setActionError(null);
-      try {
-        await cancelTask(currentTaskId);
-      } catch (error) {
-        setActionError(error instanceof Error ? error.message : "停止任务失败");
-        setComposerSignal("error");
-        window.setTimeout(() => setComposerSignal("idle"), 0);
-      }
+    if (!currentTaskId) return;
+    setActionError(null);
+    try {
+      await cancelTask(currentTaskId);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "停止任务失败");
     }
   }
 
   function animateSuggestion(event: ReactMouseEvent<HTMLButtonElement>, hovered: boolean) {
-    const icon = event.currentTarget.querySelector("svg");
     gsap.to(event.currentTarget, {
       y: hovered ? -2 : 0,
       scale: hovered ? 1.012 : 1,
       duration: motion.duration.fast,
-      ease: motion.ease.out
-    });
-    gsap.to(icon, {
-      scale: hovered ? 1.08 : 1,
-      rotation: hovered ? -2 : 0,
-      duration: motion.duration.fast,
-      ease: motion.ease.out
+      ease: motion.ease.out,
+      overwrite: "auto"
     });
   }
 
-  async function submitSuggestedAction(prompt: string, target: HTMLButtonElement) {
-    const siblings = Array.from(rootRef.current?.querySelectorAll("[data-motion='suggestion-item']") ?? [])
-      .filter((item) => item !== target);
-    gsap.timeline({ defaults: { ease: motion.ease.out } })
-      .to(target, { scale: 0.98, duration: motion.duration.micro })
-      .to(target, { scale: 1, duration: motion.duration.fast })
-      .to(siblings, { autoAlpha: 0.38, y: 4, duration: motion.duration.fast }, 0.04);
-    await submitTask(prompt);
+  function startNewConversation() {
+    setMessage("");
+    setLastUserMessage("");
+    setActionError(null);
+    setStreamError(null);
+    clearEvents();
+    setCurrentTaskId(null);
+    setShape("quick");
+  }
+
+  const statusLabel = mode === "completed"
+    ? "任务已完成"
+    : mode === "failed"
+      ? "任务执行失败"
+      : mode === "cancelled"
+        ? "任务已取消"
+        : latestStepLabel(currentTaskEvents);
+
+  if (shape === "hud") {
+    return (
+      <main ref={rootRef} className="overlay-stage overlay-stage-hud">
+        <section ref={panelRef} className={`assistant-hud is-${mode}`} data-motion="assistant-panel">
+          <span className="assistant-hud-state">
+            {running
+              ? <LoaderCircle className="assistant-spin" size={18} />
+              : mode === "failed"
+                ? <CircleX size={18} />
+                : mode === "cancelled"
+                  ? <CircleStop size={18} />
+                  : <CheckCircle2 size={18} />}
+          </span>
+          <span className="assistant-hud-copy">
+            <strong>{running ? "DeskPilot 正在执行" : statusLabel}</strong>
+            <small>{statusLabel}{visibleStepCount ? ` · ${visibleStepCount} 个步骤` : ""}</small>
+          </span>
+          <span className="assistant-hud-actions">
+            <button onClick={() => setShape("conversation")} title="展开对话"><ChevronUp size={17} /></button>
+            {running ? <button className="is-danger" onClick={stopTask} title="停止任务"><CircleStop size={17} /></button> : null}
+            <button onClick={() => void closeWindow()} title="关闭"><X size={17} /></button>
+          </span>
+        </section>
+      </main>
+    );
   }
 
   return (
-    <main
-      ref={rootRef}
-      className="overlay-stage"
-      data-motion="overlay"
-      onMouseDownCapture={(event) => {
-        const target = event.target as HTMLElement;
-        if (!target.closest("[data-overlay-interactive='true']")) {
-          void closeOverlayWithMotion();
-        }
-      }}
-    >
-      <div className="overlay-gradient" data-motion="overlay-gradient" />
-      <div className="overlay-scan-beam" data-motion="overlay-scan-beam" />
-      <section className="overlay-workspace">
-        {mode !== "idle" && hasVisibleTaskSteps ? (
-          <TaskExecutionPanel events={currentTaskEvents} mode={mode} />
-        ) : null}
+    <main ref={rootRef} className={`overlay-stage overlay-stage-${shape}`}>
+      <section ref={panelRef} className={`assistant-panel is-${shape}`} data-motion="assistant-panel">
+        <header className="assistant-titlebar" data-tauri-drag-region data-motion="panel-item">
+          <span className="assistant-brand" data-tauri-drag-region>
+            <span className="assistant-brand-mark"><img src={deskpilotWhiteIcon} alt="" /></span>
+            <span data-tauri-drag-region>
+              <strong>DeskPilot</strong>
+            </span>
+          </span>
+          <span className="assistant-window-actions">
+            {shape === "conversation" ? (
+              <button onClick={() => setShape(running ? "hud" : "quick")} title={running ? "收起为执行控制条" : "收起"}>
+                <Minus size={17} />
+              </button>
+            ) : null}
+            <button onClick={() => void closeWindow()} title="关闭"><X size={17} /></button>
+          </span>
+        </header>
 
-        <section className="composer-area">
-          {actionError || streamError ? (
-            <div className="overlay-status-message" data-overlay-interactive="true" data-motion="status-message">
-              {actionError ?? streamError}
+        {shape === "quick" ? (
+          <div className="assistant-quick-body">
+            <div className="assistant-suggestions" data-motion="panel-item">
+              {suggestedActions.map((action) => {
+                const Icon = action.icon;
+                return (
+                  <button
+                    key={action.id}
+                    className={`assistant-suggestion is-${action.id}`}
+                    disabled={isCreatingTask}
+                    onClick={() => void submitTask(action.prompt)}
+                    onPointerEnter={(event) => animateSuggestion(event, true)}
+                    onPointerLeave={(event) => animateSuggestion(event, false)}
+                  >
+                    <Icon size={14} />
+                    <span>{action.label}</span>
+                  </button>
+                );
+              })}
             </div>
-          ) : null}
-          <div className="suggestion-row" data-overlay-interactive="true">
-            {suggestedActions.map((action) => {
-              const Icon = action.icon;
-              return (
-                <button
-                  key={action.id}
-                  className={`suggestion-button suggestion-button-${action.id}`}
-                  data-motion="suggestion-item"
-                  disabled={isCreatingTask}
-                  onClick={(event) => submitSuggestedAction(action.prompt, event.currentTarget)}
-                  onPointerEnter={(event) => animateSuggestion(event, true)}
-                  onPointerLeave={(event) => animateSuggestion(event, false)}
-                >
-                  <Icon size={20} />
-                  <span>{action.label}</span>
-                </button>
-              );
-            })}
+            <CommandComposer
+              message={message}
+              mode={mode}
+              disabled={isCreatingTask}
+              signal={composerSignal}
+              onChange={setMessage}
+              onSubmit={onSubmit}
+              onStop={stopTask}
+            />
           </div>
-          <CommandComposer
-            message={message}
-            mode={mode}
-            disabled={isCreatingTask}
-            signal={composerSignal}
-            onChange={setMessage}
-            onSubmit={onSubmit}
-            onStop={stopTask}
-          />
-        </section>
+        ) : (
+          <div className="assistant-conversation">
+            <div className="assistant-context-row" data-motion="panel-item">
+              <span><Globe2 size={13} />当前网页</span>
+              <span><BookOpen size={13} />知识库</span>
+              <button onClick={startNewConversation}>新对话</button>
+            </div>
+
+            <div className="assistant-messages" data-motion="panel-item">
+              {lastUserMessage ? <div className="assistant-user-message">{lastUserMessage}</div> : null}
+
+              {running ? (
+                <div className="assistant-response is-running">
+                  <span className="assistant-avatar"><Sparkles size={16} /></span>
+                  <div>
+                    <strong>正在处理</strong>
+                    <p>{statusLabel}</p>
+                  </div>
+                </div>
+              ) : finalResponse ? (
+                <div className="assistant-response">
+                  <span className="assistant-avatar"><Sparkles size={16} /></span>
+                  <div>
+                    <strong>DeskPilot</strong>
+                    <p>{finalResponse}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              {actionError || streamError ? (
+                <div className="assistant-error" role="status">{actionError ?? streamError}</div>
+              ) : null}
+
+              {mode !== "idle" && visibleStepCount > 0 ? (
+                <section className="assistant-execution">
+                  <button className="assistant-execution-toggle" onClick={() => setStepsExpanded((value) => !value)}>
+                    <span>{running ? <LoaderCircle className="assistant-spin" size={14} /> : <CheckCircle2 size={14} />}</span>
+                    <strong>{running ? "执行过程" : "执行记录"}</strong>
+                    <small>{visibleStepCount} 个步骤</small>
+                    {stepsExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                  </button>
+                  {stepsExpanded ? <TaskExecutionPanel events={currentTaskEvents} mode={mode} /> : null}
+                </section>
+              ) : null}
+            </div>
+
+            <footer className="assistant-composer-footer" data-motion="panel-item">
+              <CommandComposer
+                message={message}
+                mode={mode}
+                disabled={isCreatingTask}
+                signal={composerSignal}
+                onChange={setMessage}
+                onSubmit={onSubmit}
+                onStop={stopTask}
+              />
+            </footer>
+          </div>
+        )}
       </section>
     </main>
   );
