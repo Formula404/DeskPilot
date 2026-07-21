@@ -1715,3 +1715,23 @@
     transition-duration: 1ms !important;
   }
 }
+.knowledge-storage-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 34px;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.knowledge-storage-picker input,
+.knowledge-storage-picker button {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid #d7dee6;
+  border-radius: 5px;
+  background: #fff;
+  color: #465668;
+}
+
+.knowledge-storage-picker input { padding: 0 10px; font-size: 11px; }
+.knowledge-storage-picker button { display: grid; place-items: center; padding: 0 11px; font-size: 11px; }
+.knowledge-storage-picker button:hover { border-color: #9bb8df; color: #245fc7; }

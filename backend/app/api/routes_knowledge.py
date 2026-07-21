@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 
 from backend.app.browser.bridge import browser_bridge
 from backend.app.knowledge.backup import backup_database
-from backend.app.knowledge.compiler import KnowledgeCompileError, compile_source, review_proposal
+from backend.app.knowledge.compiler import KnowledgeCompileError, compile_source, promote_answer, review_proposal
 from backend.app.knowledge.indexer import read_indexed_note, rebuild_index
-from backend.app.knowledge.lint import lint_knowledge
+from backend.app.knowledge.lint import lint_knowledge, semantic_lint_knowledge
 from backend.app.knowledge.markdown import atomic_write, parse_markdown_document, split_sections
 from backend.app.knowledge.models import FileIngestRequest, KnowledgeProfileCreate, KnowledgeQueryRequest, KnowledgeSettings, TextIngestRequest
 from backend.app.knowledge.paths import (
@@ -39,8 +39,15 @@ from backend.app.knowledge.profiles import active_profile_id, create_profile, de
 from backend.app.knowledge.settings import get_knowledge_settings, save_knowledge_settings
 from backend.app.knowledge.source_service import KnowledgeIngestError, ingest_content, ingest_file
 from backend.app.knowledge.document_parser import parse_document
-from backend.app.knowledge.web_monitor import check_web_source, list_watches, set_watch
+from backend.app.knowledge.web_monitor import check_web_source, get_watch, list_watches, set_watch
 from backend.app.knowledge.obsidian import export_obsidian_vault, obsidian_status
+from backend.app.knowledge.storage import change_storage_directory, choose_storage_directory, open_storage_directory
+from backend.app.knowledge.catalog import append_log, catalog_status, refresh_catalogs
+from backend.app.knowledge.note_management import (
+    KnowledgeNoteManagementError,
+    delete_managed_note,
+    update_managed_note,
+)
 from backend.app.tools.registry import tool_registry
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -61,6 +68,25 @@ class RebuildRequest(BaseModel):
 class WebWatchUpdate(BaseModel):
     enabled: bool = True
     interval_minutes: int | None = Field(default=None, ge=15, le=43200)
+
+
+class KnowledgeNoteUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    entity_type: Literal["concept", "person", "project", "tool", "method", "event", "note"]
+    summary: str = Field(default="", max_length=20000)
+    overview: str = Field(default="", max_length=50000)
+    details: str = Field(default="", max_length=200000)
+    tags: list[str] = Field(default_factory=list, max_length=50)
+
+
+class KnowledgeStorageUpdate(BaseModel):
+    path: str = Field(min_length=1, max_length=2000)
+
+
+class KnowledgePromotionRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    answer: str = Field(min_length=1, max_length=100000)
+    note_ids: list[str] = Field(min_length=1, max_length=50)
 
 
 def _raise_domain_error(exc: Exception) -> None:
@@ -93,6 +119,32 @@ def knowledge_settings() -> dict[str, Any]:
     }
 
 
+@router.post("/storage/choose")
+def choose_knowledge_storage() -> dict[str, Any]:
+    try:
+        selected = choose_storage_directory()
+        return {"path": selected, "cancelled": selected is None}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/storage")
+def update_knowledge_storage(payload: KnowledgeStorageUpdate) -> dict[str, Any]:
+    try:
+        return change_storage_directory(payload.path)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/storage/open")
+def open_knowledge_storage() -> dict[str, bool]:
+    try:
+        open_storage_directory()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="无法打开知识库目录") from exc
+    return {"ok": True}
+
+
 @router.get("/profiles")
 def knowledge_profiles() -> dict[str, Any]:
     return {"items": list_profiles(), "active_profile_id": active_profile_id()}
@@ -101,6 +153,25 @@ def knowledge_profiles() -> dict[str, Any]:
 @router.get("/obsidian/status")
 def knowledge_obsidian_status() -> dict[str, Any]:
     return obsidian_status()
+
+
+@router.get("/catalog")
+def knowledge_catalog() -> dict[str, Any]:
+    refresh_catalogs()
+    return catalog_status()
+
+
+@router.post("/promote")
+def promote_knowledge_answer(payload: KnowledgePromotionRequest) -> dict[str, Any]:
+    try:
+        return promote_answer(payload.title, payload.answer, payload.note_ids)
+    except KnowledgeCompileError as exc:
+        _raise_domain_error(exc)
+
+
+@router.post("/lint/semantic")
+async def semantic_lint() -> dict[str, Any]:
+    return await semantic_lint_knowledge()
 
 
 @router.post("/obsidian/export")
@@ -171,13 +242,30 @@ def knowledge_note_detail(note_id: str) -> dict[str, Any]:
     }
 
 
+@router.put("/notes/{note_id}")
+def update_knowledge_note(note_id: str, payload: KnowledgeNoteUpdate) -> dict[str, Any]:
+    try:
+        update_managed_note(note_id, payload.model_dump())
+        return knowledge_note_detail(note_id)
+    except KnowledgeNoteManagementError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/notes/{note_id}")
+def delete_knowledge_note(note_id: str) -> dict[str, Any]:
+    try:
+        return delete_managed_note(note_id)
+    except KnowledgeNoteManagementError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/sources/{source_id}")
 def knowledge_source_detail(source_id: str) -> dict[str, Any]:
     source = get_source(source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     snapshots = list_source_snapshots(source_id)
-    return {**source, "snapshots": snapshots}
+    return {**source, "snapshots": snapshots, "watch": get_watch(source_id) if source.get("source_type") == "web" else None}
 
 
 @router.get("/sources")
@@ -306,6 +394,7 @@ async def query_knowledge(payload: KnowledgeQueryRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail={"code": "KNOWLEDGE_DISABLED", "message": "知识库已停用。"})
     if payload.mode == "search":
         results = search_knowledge(payload.query, payload.limit)
+        append_log("query", payload.query, f"Search returned {len(results)} pages.")
         return {"query": payload.query, "results": results, "answer": None}
     return await answer_knowledge(payload.query, payload.limit)
 
@@ -314,6 +403,21 @@ async def query_knowledge(payload: KnowledgeQueryRequest) -> dict[str, Any]:
 async def compile_knowledge_source(source_id: str) -> dict[str, Any]:
     try:
         return await compile_source(source_id)
+    except KnowledgeCompileError as exc:
+        _raise_domain_error(exc)
+
+
+@router.post("/notes/{note_id}/refresh")
+async def refresh_knowledge_note(note_id: str) -> dict[str, Any]:
+    note = get_note(note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Knowledge note not found")
+    source_ids = list(dict.fromkeys(str(item["source_id"]) for item in note.get("sources", [])))
+    if not source_ids:
+        raise HTTPException(status_code=400, detail="该知识页面没有可用于更新的来源")
+    try:
+        results = [await compile_source(source_id, note_id) for source_id in source_ids]
+        return {"note_id": note_id, "results": results, "pending": [proposal for result in results for proposal in result.get("pending", [])]}
     except KnowledgeCompileError as exc:
         _raise_domain_error(exc)
 
@@ -331,6 +435,10 @@ def update_source_watch(source_id: str, payload: WebWatchUpdate) -> dict[str, An
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     if source.get("source_type") != "web":
         raise HTTPException(status_code=400, detail="Only web sources can be watched")
+    if payload.enabled:
+        current_settings = get_knowledge_settings()
+        if not current_settings.web_update_enabled:
+            save_knowledge_settings(current_settings.model_copy(update={"web_update_enabled": True}))
     return set_watch(source_id, payload.enabled, payload.interval_minutes)
 
 

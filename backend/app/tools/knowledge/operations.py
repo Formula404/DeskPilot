@@ -5,7 +5,7 @@ from backend.app.db.repository import now_iso, save_browser_context
 from backend.app.knowledge.backup import backup_database
 from backend.app.knowledge.compiler import KnowledgeCompileError, compile_source, review_proposal
 from backend.app.knowledge.indexer import rebuild_index
-from backend.app.knowledge.lint import lint_knowledge
+from backend.app.knowledge.lint import lint_knowledge, semantic_lint_knowledge
 from backend.app.knowledge.models import FileIngestRequest, TextIngestRequest
 from backend.app.knowledge.paths import knowledge_root
 from backend.app.knowledge.retrieval import answer_knowledge, search_knowledge
@@ -156,6 +156,11 @@ async def _lint(_: dict) -> ToolResult:
     return ToolResult(ok=True, data=report, message="知识库检查完成")
 
 
+async def _semantic_lint(_: dict) -> ToolResult:
+    report = await semantic_lint_knowledge()
+    return ToolResult(ok=True, data=report, message="知识库语义检查完成")
+
+
 async def _rebuild(_: dict) -> ToolResult:
     backup = backup_database()
     result = rebuild_index()
@@ -282,6 +287,15 @@ lint = ToolDefinition(
     risk_level="low",
     required_permissions=["knowledge:read"],
     handler=_lint,
+)
+
+semantic_lint = ToolDefinition(
+    name="knowledge.semantic_lint",
+    description="检查知识矛盾、孤立页面、缺失概念、交叉引用和研究空白",
+    input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    risk_level="low",
+    required_permissions=["knowledge:read"],
+    handler=_semantic_lint,
 )
 
 rebuild = ToolDefinition(

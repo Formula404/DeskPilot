@@ -41,6 +41,7 @@ from backend.app.knowledge.repository import (
     get_snapshot,
     get_source,
     link_note_source,
+    list_proposals,
     replace_note_relations,
     resolve_proposal,
     source_has_pending_proposals,
@@ -49,6 +50,7 @@ from backend.app.knowledge.repository import (
     upsert_note,
 )
 from backend.app.knowledge.settings import get_knowledge_settings
+from backend.app.knowledge.catalog import append_log, ensure_profile_workspace, refresh_catalogs
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +62,13 @@ class KnowledgeCompileError(RuntimeError):
 
 
 def _fallback_operation(
-    source: dict[str, Any], snapshot: dict[str, Any], chunks: dict[str, str]
+    source: dict[str, Any], snapshot: dict[str, Any], chunks: dict[str, str], target_note: dict[str, Any] | None = None
 ) -> ProposalOperation:
     text = "\n\n".join(chunks.values()).strip()
     title = str(source.get("title") or "Untitled knowledge")
-    existing = find_note_by_title(title)
+    existing = target_note or find_note_by_title(title)
+    if target_note:
+        title = str(target_note["title"])
     summary = text[:160].strip()
     if len(text) > 160:
         summary += "..."
@@ -79,10 +83,20 @@ def _fallback_operation(
         )
         for anchor in list(chunks)[:6]
     ]
+    classification_text = f"{title}\n{text[:3000]}".lower()
+    method_markers = ("方法", "流程", "步骤", "实践", "指南", "取舍", "评估", "工作流", "最佳实践")
+    concept_markers = ("概念", "原理", "理论", "机制", "是什么", "定义")
+    fallback_entity_type = "note"
+    if any(marker in classification_text for marker in method_markers):
+        fallback_entity_type = "method"
+    elif any(marker in classification_text for marker in concept_markers):
+        fallback_entity_type = "concept"
+    existing_entity_type = str(existing.get("entity_type", "note")) if existing else ""
+    entity_type = fallback_entity_type if existing_entity_type in {"", "note"} else existing_entity_type
     return ProposalOperation(
         operation="update_note" if existing else "create_note",
         target_note_id=str(existing["id"]) if existing else None,
-        entity_type=str(existing.get("entity_type", "note")) if existing else "note",
+        entity_type=entity_type,
         title=title,
         summary=summary,
         overview=overview,
@@ -96,6 +110,7 @@ async def _model_proposal(
     source: dict[str, Any],
     snapshot: dict[str, Any],
     chunks: dict[str, str],
+    target_note: dict[str, Any] | None = None,
 ) -> CompilationProposal | None:
     app_settings = get_settings()
     knowledge_settings = get_knowledge_settings()
@@ -114,7 +129,9 @@ async def _model_proposal(
         },
         "chunks": chunks,
         "related_notes": related,
+        "requested_target_note": {"id": target_note["id"], "title": target_note["title"]} if target_note else None,
         "purpose": purpose_path().read_text(encoding="utf-8")[:5000],
+        "schema": (ensure_profile_workspace() / "schema.md").read_text(encoding="utf-8")[:8000],
     }
     client = AsyncOpenAI(
         api_key=app_settings.openai_api_key,
@@ -133,13 +150,76 @@ async def _model_proposal(
                     "实体类型仅可为 concept、person、project、tool、method、event、note。"
                     "每条事实必须引用输入中真实存在的 source_id、snapshot_id 和 chunk anchor。"
                     "优先更新 related_notes 中同一主题条目，不能创造路径、SQL 或工具调用。"
+                    "一个来源可以产生多个操作；必须更新所有被新证据实质影响的页面，并补充合理关系或冲突。"
+                    "避免为来源本身机械创建页面，优先把信息综合进少量稳定概念和实体页面。"
+                    "如果 requested_target_note 非空，本次必须更新该页面，target_note_id 必须与其 id 一致。"
+                    "create_note/update_note 必须包含 operation、target_note_id(null 或真实 ID)、entity_type、title、"
+                    "summary、overview、details_markdown、evidence；evidence 是对象数组，每项必须包含"
+                    "source_id、snapshot_id、anchor、reason，anchor 必须是输入 chunks 的键。"
+                    "add_relation 必须包含 operation、target_note_id 和 relations，relations 每项包含"
+                    "relation_type、target_note_id、confidence。不要输出上述结构以外的同义字段。"
+                    "每个知识页面的 summary 和 details_markdown 都不能为空；details_markdown 应保留支撑该页面的"
+                    "关键事实、步骤、条件、例外和结论，而不是重复摘要。论文必须保留研究问题、方法、数据或实验、"
+                    "主要结果、限制和关键术语。拆成多个页面时要覆盖来源中的全部实质内容；导航、广告和推荐内容写入 ignored_content。"
                 ),
             },
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ],
     )
     raw = response.choices[0].message.content or "{}"
-    return CompilationProposal.model_validate_json(raw)
+    payload = json.loads(raw)
+    operations = payload.get("operations") if isinstance(payload, dict) else None
+    if isinstance(operations, list):
+        for operation in operations:
+            if not isinstance(operation, dict):
+                continue
+            if "operation" not in operation and operation.get("type"):
+                operation["operation"] = operation.pop("type")
+            entity_aliases = {"pattern": "method", "overview": "concept", "comparison": "concept"}
+            if operation.get("entity_type") in entity_aliases:
+                operation["entity_type"] = entity_aliases[operation["entity_type"]]
+            raw_evidence = operation.get("evidence") or operation.pop("evidence_chunks", [])
+            if isinstance(raw_evidence, list):
+                normalized_evidence = []
+                for item in raw_evidence:
+                    evidence = dict(item) if isinstance(item, dict) else {"anchor": str(item)}
+                    evidence.setdefault("source_id", source["id"])
+                    evidence.setdefault("snapshot_id", snapshot["id"])
+                    evidence.setdefault("reason", "模型引用的来源片段")
+                    normalized_evidence.append(evidence)
+                operation["evidence"] = normalized_evidence
+        if target_note:
+            operations = [
+                operation
+                for operation in operations
+                if isinstance(operation, dict)
+                and (
+                    operation.get("operation") not in {"create_note", "update_note"}
+                    or (
+                        operation.get("operation") == "update_note"
+                        and operation.get("target_note_id") == target_note["id"]
+                    )
+                )
+            ]
+            payload["operations"] = operations
+    ignored = payload.get("ignored_content") if isinstance(payload, dict) else None
+    if isinstance(ignored, list):
+        payload["ignored_content"] = [item if isinstance(item, dict) else {"anchor": str(item), "reason": "模型判定为非知识内容"} for item in ignored]
+    elif isinstance(ignored, str):
+        payload["ignored_content"] = [{"anchor": "model-summary", "reason": ignored}]
+    valid_operations: list[ProposalOperation] = []
+    for operation in payload.get("operations", []) if isinstance(payload, dict) else []:
+        try:
+            validated = ProposalOperation.model_validate(operation)
+            _validate_operation(validated, str(source["id"]), str(snapshot["id"]), chunks)
+            valid_operations.append(validated)
+        except Exception:
+            logger.warning("Skipping invalid knowledge operation returned by model", exc_info=True)
+    return CompilationProposal(
+        source_id=str(payload.get("source_id") or source["id"]),
+        operations=valid_operations,
+        ignored_content=payload.get("ignored_content", []) if isinstance(payload, dict) else [],
+    )
 
 
 def _validate_operation(
@@ -151,6 +231,10 @@ def _validate_operation(
     if operation.operation in {"create_note", "update_note"}:
         if not operation.title:
             raise KnowledgeCompileError("知识提案缺少标题。", "KNOWLEDGE_SCHEMA_INVALID")
+        if not operation.summary.strip():
+            raise KnowledgeCompileError("知识提案缺少摘要。", "KNOWLEDGE_SCHEMA_INVALID")
+        if not operation.details_markdown.strip():
+            raise KnowledgeCompileError("知识提案缺少详情。", "KNOWLEDGE_SCHEMA_INVALID")
         if not operation.evidence:
             raise KnowledgeCompileError("知识提案缺少来源证据。", "KNOWLEDGE_CITATION_MISSING")
     if operation.operation in {"add_relation", "mark_conflict"}:
@@ -174,6 +258,8 @@ def _commit_note(
     operation: ProposalOperation,
     source: dict[str, Any],
     snapshot: dict[str, Any],
+    *,
+    preserve_manual_sections: bool = True,
 ) -> dict[str, Any]:
     existing = get_note(operation.target_note_id) if operation.target_note_id else find_note_by_title(operation.title)
     now = now_iso()
@@ -188,6 +274,7 @@ def _commit_note(
     evidence_by_key = {
         (item.source_id, item.snapshot_id, item.anchor): item for item in operation.evidence
     }
+    source_ids.update(item.source_id for item in operation.evidence)
     sensitivity = str(source.get("sensitivity") or "normal")
     path: Path
 
@@ -215,7 +302,9 @@ def _commit_note(
                 (evidence.source_id, evidence.snapshot_id, evidence.anchor), evidence
             )
         _, old_sections = split_sections(body)
+        entity_type = old_frontmatter.entity_type
     else:
+        entity_type = operation.entity_type
         path = knowledge_root() / "notes" / operation.entity_type / (
             f"{slugify(operation.title)}--{note_id[-8:]}.md"
         )
@@ -228,7 +317,7 @@ def _commit_note(
         ("Overview", old_sections.get("Overview", "")),
         ("Details", old_sections.get("Details", "")),
     ]:
-        if section_name in manual_sections:
+        if preserve_manual_sections and section_name in manual_sections:
             if section_name == "Summary":
                 summary = current
             elif section_name == "Overview":
@@ -238,7 +327,7 @@ def _commit_note(
 
     frontmatter = NoteFrontmatter(
         id=note_id,
-        entity_type=str(existing["entity_type"]) if existing else operation.entity_type,
+        entity_type=entity_type,
         title=operation.title,
         aliases=sorted(aliases),
         status="active",
@@ -334,7 +423,7 @@ def _commit_relation_operation(operation: ProposalOperation, source_id: str) -> 
     return {"note_id": note["id"], "title": note["title"], "status": "committed", "operation": operation.operation}
 
 
-async def compile_source(source_id: str) -> dict[str, Any]:
+async def compile_source(source_id: str, target_note_id: str | None = None) -> dict[str, Any]:
     source = get_source(source_id)
     if not source:
         raise KnowledgeCompileError("知识来源不存在。", "KNOWLEDGE_SOURCE_NOT_FOUND")
@@ -349,12 +438,22 @@ async def compile_source(source_id: str) -> dict[str, Any]:
     chunks = source_chunks(source_content)
     if not chunks:
         raise KnowledgeCompileError("来源快照没有可编译正文。", "KNOWLEDGE_CONTENT_EMPTY")
+    target_note = get_note(target_note_id) if target_note_id else None
+    if target_note_id and not target_note:
+        raise KnowledgeCompileError("要更新的知识页面不存在。", "KNOWLEDGE_NOTE_NOT_FOUND")
+    for item in list_proposals():
+        if item.get("job_id") and (not target_note_id or item.get("target_note_id") == target_note_id):
+            from backend.app.db.connection import connect
+            with connect() as connection:
+                job = connection.execute("SELECT target_id FROM knowledge_jobs WHERE id=?", (item["job_id"],)).fetchone()
+            if job and job["target_id"] == source_id:
+                return {"job_id": item["job_id"], "source_id": source_id, "committed": [], "pending": [{"proposal_id": item["id"], "status": "pending", "path": item["proposal_path"]}], "fallback_used": False, "already_pending": True}
 
     job_id = create_job("compile", source_id, {"snapshot_id": snapshot["id"]})
     update_job(job_id, status="running")
     fallback_used = False
     try:
-        proposal = await _model_proposal(source, snapshot, chunks)
+        proposal = await _model_proposal(source, snapshot, chunks, target_note)
     except Exception:
         logger.exception("Knowledge model compilation failed; using deterministic fallback", extra={"source_id": source_id})
         proposal = None
@@ -362,8 +461,10 @@ async def compile_source(source_id: str) -> dict[str, Any]:
         fallback_used = True
         proposal = CompilationProposal(
             source_id=source_id,
-            operations=[_fallback_operation(source, snapshot, chunks)],
+            operations=[_fallback_operation(source, snapshot, chunks, target_note)],
         )
+    if target_note and not any(operation.operation == "update_note" and operation.target_note_id == target_note_id for operation in proposal.operations):
+        proposal = CompilationProposal(source_id=source_id, operations=[_fallback_operation(source, snapshot, chunks, target_note)])
     if proposal.source_id != source_id:
         update_job(job_id, status="failed", error_code="KNOWLEDGE_SCHEMA_INVALID")
         raise KnowledgeCompileError("编译结果 source_id 不匹配。", "KNOWLEDGE_SCHEMA_INVALID")
@@ -395,6 +496,8 @@ async def compile_source(source_id: str) -> dict[str, Any]:
         update_job(job_id, status=status, result=result)
         if not pending:
             update_source(source_id, status="active")
+        refresh_catalogs()
+        append_log("compile", str(source.get("title") or source_id), f"Committed: {len(committed)}; pending: {len(pending)}; fallback: {fallback_used}")
         return result
     except Exception as exc:
         update_job(
@@ -428,6 +531,7 @@ def review_proposal(proposal_id: str, decision: str) -> dict[str, Any]:
         resolve_proposal(proposal_id, "rejected")
         if not source_has_pending_proposals(str(payload_source_id)):
             update_source(str(payload_source_id), status="active")
+        append_log("review", proposal_id, "Rejected knowledge proposal.")
         return {"proposal_id": proposal_id, "status": "rejected"}
     if decision != "accept":
         raise KnowledgeCompileError("提案决定必须是 accept 或 reject。", "KNOWLEDGE_INVALID_DECISION")
@@ -442,4 +546,39 @@ def review_proposal(proposal_id: str, decision: str) -> dict[str, Any]:
     source_path.unlink(missing_ok=True)
     if not source_has_pending_proposals(str(source["id"])):
         update_source(str(source["id"]), status="active")
+    refresh_catalogs()
+    append_log("review", str(result.get("title") or proposal_id), f"Accepted proposal {proposal_id}")
     return {"proposal_id": proposal_id, "status": "accepted", "note": result}
+
+
+def promote_answer(title: str, answer: str, note_ids: list[str]) -> dict[str, Any]:
+    evidence: list[EvidenceItem] = []
+    source: dict[str, Any] | None = None
+    snapshot: dict[str, Any] | None = None
+    for note_id in note_ids:
+        note = get_note(note_id)
+        if not note:
+            continue
+        for item in note.get("sources", []):
+            if not item.get("snapshot_id") or not item.get("evidence_anchor"):
+                continue
+            candidate_source = get_source(str(item["source_id"]))
+            candidate_snapshot = get_snapshot(str(item["snapshot_id"]))
+            if not candidate_source or not candidate_snapshot:
+                continue
+            source = source or candidate_source
+            snapshot = snapshot or candidate_snapshot
+            evidence.append(EvidenceItem(source_id=str(item["source_id"]), snapshot_id=str(item["snapshot_id"]), anchor=str(item["evidence_anchor"]), reason="查询综合依据"))
+    if not source or not snapshot or not evidence:
+        raise KnowledgeCompileError("查询回答没有可追溯证据，不能提升为知识页面。", "KNOWLEDGE_PROMOTION_EVIDENCE_MISSING")
+    existing = find_note_by_title(title)
+    operation = ProposalOperation(
+        operation="update_note" if existing else "create_note",
+        target_note_id=str(existing["id"]) if existing else None,
+        title=title.strip(), entity_type="note", summary=answer.strip()[:240], overview=answer.strip()[:1500],
+        details_markdown=answer.strip(), evidence=evidence[:20], tags=["promoted-query"],
+    )
+    result = _commit_note(operation, source, snapshot)
+    refresh_catalogs()
+    append_log("promote", title, f"Promoted query answer using {len(evidence[:20])} evidence links.")
+    return result

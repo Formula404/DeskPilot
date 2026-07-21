@@ -99,6 +99,9 @@ async def check_web_source(source_id: str) -> dict[str, Any]:
         raise ValueError("该来源不是可检查的网页来源。")
     watch = get_watch(source_id)
     interval = int((watch or {}).get("interval_minutes") or get_knowledge_settings().web_update_interval_minutes)
+    # A manual check also establishes a watch. Existing watches retain their
+    # explicit state, while a newly created row must be schedulable.
+    watch_enabled = int(bool(watch.get("enabled"))) if watch else 1
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=20, headers={"User-Agent": "DeskPilot/0.1"}) as client:
             response = await client.get(str(source["canonical_uri"]))
@@ -131,13 +134,13 @@ async def check_web_source(source_id: str) -> dict[str, Any]:
             """
             INSERT INTO knowledge_web_watches
             (profile_id, source_id, enabled, interval_minutes, last_checked_at, next_check_at, last_status, last_error, updated_at)
-            VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(profile_id, source_id) DO UPDATE SET
               last_checked_at=excluded.last_checked_at, next_check_at=excluded.next_check_at,
               last_changed_at=CASE WHEN excluded.last_status='changed' THEN excluded.last_checked_at ELSE knowledge_web_watches.last_changed_at END,
               last_status=excluded.last_status, last_error=excluded.last_error, updated_at=excluded.updated_at
             """,
-            (active_profile_id(), source_id, interval, now_iso(), next_check, status, error, now_iso()),
+            (active_profile_id(), source_id, watch_enabled, interval, now_iso(), next_check, status, error, now_iso()),
         )
     return {**result, "check_status": status, "error": error, "compilation": compilation, "next_check_at": next_check}
 

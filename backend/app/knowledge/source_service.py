@@ -19,6 +19,7 @@ from backend.app.knowledge.repository import (
     mark_source_notes_stale,
     update_source,
 )
+from backend.app.knowledge.catalog import append_log
 
 TRACKING_PARAMETERS = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "ref_src"}
 SECRET_PATTERNS = [
@@ -154,6 +155,7 @@ def ingest_content(
         status="updated" if was_update else "active",
     )
     index_source_path(path)
+    append_log("ingest", clean_title, f"Source: {source_id}; snapshot: {snapshot_id}; status: {'updated' if was_update else 'created'}")
     if source_type == "web":
         from backend.app.knowledge.settings import get_knowledge_settings
 

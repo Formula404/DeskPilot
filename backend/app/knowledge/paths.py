@@ -3,14 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.app.core.paths import data_dir
+from backend.app.db.repository import get_setting
+
+KNOWLEDGE_ROOT_KEY = "knowledge.root_path"
 
 
 def knowledge_root() -> Path:
-    return data_dir() / "knowledge"
+    configured = get_setting(KNOWLEDGE_ROOT_KEY)
+    configured = configured.strip() if configured else ""
+    return Path(configured).expanduser() if configured else data_dir() / "knowledge"
 
 
 def purpose_path() -> Path:
     return knowledge_root() / "purpose.md"
+
+
+def profile_workspace(profile_id: str | None = None) -> Path:
+    from backend.app.knowledge.profiles import active_profile_id
+    return knowledge_root() / "profiles" / (profile_id or active_profile_id())
 
 
 def ensure_knowledge_dirs() -> None:
@@ -33,6 +43,7 @@ def ensure_knowledge_dirs() -> None:
         "outputs/reports",
         "cache/chunks",
         "trash",
+        "profiles",
     ]:
         (root / relative).mkdir(parents=True, exist_ok=True)
 

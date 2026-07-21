@@ -4,7 +4,7 @@
 > 适用版本：DeskPilot 0.1.x 及后续知识库迭代  
 > 设计目标：将 Karpathy 的 LLM Wiki 思路融合进 DeskPilot，形成一个本地优先、来源可追溯、可由 Agent 持续编译和维护的个人知识库。
 
-> 实现状态（2026-07-13）：Phase 0 至 Phase 5 已经落地，包括网页/文本/Markdown/TXT/PDF/DOCX/图片 Ingest、版本快照与去重、Compile Proposal、Review、中文分词 FTS Query、带引用回答、Lint、数据库备份与索引重建、Agent/API 接入、多知识库 Profile、定时网页更新，以及独立 Knowledge 工作区。Obsidian 已作为按 Profile 导出的可选 Vault 集成，DeskPilot 仍是事实来源且不依赖 Obsidian CLI。向量检索暂不引入。
+> 实现状态（2026-07-13）：Phase 0 至 Phase 5 已经落地，包括多格式 Ingest、版本快照与去重、多页面 Compile Proposal、Review、中文分词 FTS Query、L1/L2/L3 渐进读取、带引用回答与 Promotion、结构及语义 Lint、按 Profile 自动维护的 `index.md`、`Concept Index.md`、`Dashboard.md`、`log.md`、`schema.md`、数据库备份与索引重建、多知识库 Profile、定时网页更新和独立 Knowledge 工作区。Obsidian 是可选导出层；向量检索不作为当前依赖。
 
 ## 1. 结论
 

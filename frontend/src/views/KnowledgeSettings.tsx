@@ -19,18 +19,22 @@ import {
 } from "lucide-react";
 import {
   getKnowledgeSettings,
+  changeKnowledgeStorage,
+  chooseKnowledgeStorage,
   exportObsidianVault,
   getKnowledgeStatus,
   getKnowledgeProposals,
   ingestCurrentPage,
   lintKnowledge,
   rebuildKnowledgeIndex,
+  openKnowledgeStorage,
   resolveKnowledgeProposal,
   updateKnowledgeSettings
+  ,semanticLintKnowledge
 } from "../api/client";
 import type { KnowledgeProposal, KnowledgeSettings, KnowledgeStatus } from "../types/api";
 
-type ActionState = "idle" | "saving" | "ingesting" | "linting" | "rebuilding" | "reviewing" | "exporting";
+type ActionState = "idle" | "saving" | "ingesting" | "linting" | "semantic-linting" | "rebuilding" | "reviewing" | "exporting" | "relocating";
 
 const defaultSettings: KnowledgeSettings = {
   enabled: true,
@@ -55,6 +59,7 @@ export function KnowledgeSettingsPanel() {
   const [proposals, setProposals] = useState<KnowledgeProposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<ActionState>("idle");
+  const [storagePath, setStoragePath] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "warning" | "error"; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -66,6 +71,7 @@ export function KnowledgeSettingsPanel() {
     const failures: string[] = [];
     if (settingsResult.status === "fulfilled") {
       setSettings(settingsResult.value);
+      setStoragePath(settingsResult.value.root_path);
     } else {
       failures.push("设置");
     }
@@ -105,6 +111,16 @@ export function KnowledgeSettingsPanel() {
     } finally {
       setAction("idle");
     }
+  }
+
+  async function runSemanticLint() {
+    setAction("semantic-linting"); setNotice(null);
+    try {
+      const result = await semanticLintKnowledge() as { summary?: { issues?: number }; model_used?: boolean };
+      const count = result.summary?.issues ?? 0;
+      setNotice({ tone: count ? "warning" : "success", text: `语义检查完成：${count} 项维护建议${result.model_used ? "（模型分析）" : "（本地规则）"}` });
+    } catch (error) { setNotice({ tone: "error", text: error instanceof Error ? error.message : "语义检查失败" }); }
+    finally { setAction("idle"); }
   }
 
   function setValue<K extends keyof KnowledgeSettings>(key: K, value: KnowledgeSettings[K]) {
@@ -298,10 +314,21 @@ export function KnowledgeSettingsPanel() {
           <FolderOpen size={18} />
           <div><strong>存储与维护</strong><span className="knowledge-path">{settings.root_path || status?.root_path}</span></div>
         </div>
+        <div className="knowledge-storage-picker">
+          <input value={storagePath} onChange={(event) => setStoragePath(event.target.value)} spellCheck={false} aria-label="知识库存储路径" />
+          <button disabled={busy} onClick={() => void chooseKnowledgeStorage().then((result) => { if (result.path) setStoragePath(result.path); }).catch((error) => setNotice({ tone: "error", text: String(error) }))}>选择</button>
+          <button disabled={busy} title="打开知识库文件夹" onClick={() => void openKnowledgeStorage().catch((error) => setNotice({ tone: "error", text: String(error) }))}><FolderOpen size={16} /></button>
+        </div>
         <div className="knowledge-maintenance-actions">
+          <button disabled={busy || !storagePath.trim() || storagePath.trim() === settings.root_path} onClick={() => { if (window.confirm("切换后将迁移空目录并自动重建知识索引。确认继续？")) void runAction("relocating", () => changeKnowledgeStorage(storagePath.trim()), "知识库位置已切换，索引已重建"); }}>
+            {action === "relocating" ? <LoaderCircle className="is-spinning" size={16} /> : <FolderOpen size={16} />}切换位置
+          </button>
           <button disabled={busy} onClick={() => void runAction("linting", lintKnowledge, "知识库健康检查已完成")}>
             {action === "linting" ? <LoaderCircle className="is-spinning" size={16} /> : <FileCheck2 size={16} />}
             健康检查
+          </button>
+          <button disabled={busy} onClick={() => void runSemanticLint()}>
+            {action === "semantic-linting" ? <LoaderCircle className="is-spinning" size={16} /> : <Search size={16} />}语义检查
           </button>
           <button
             disabled={busy}

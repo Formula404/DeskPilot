@@ -186,13 +186,17 @@ async def maintain_knowledge(state: AgentState) -> AgentState:
             **state,
             "final_response": "重建索引会先备份数据库并重写派生索引。请明确回复“确认重建知识索引”后再执行。",
         }
-    tool_name = "knowledge.rebuild_index" if rebuild else "knowledge.lint"
+    semantic = any(keyword in message for keyword in ["语义", "矛盾", "孤立页面", "知识空白"])
+    tool_name = "knowledge.rebuild_index" if rebuild else "knowledge.semantic_lint" if semantic else "knowledge.lint"
     next_state, result = await _run_knowledge_tool(state, tool_name, {})
     if not result.ok:
         return {**next_state, "error": result.message}
     data = result.data or {}
     if rebuild:
         response = f"知识索引已重建：{data.get('notes', 0)} 条知识、{data.get('sources', 0)} 个来源。"
+    elif semantic:
+        summary = data.get("summary") or {}
+        response = f"知识库语义检查完成：发现 {summary.get('issues', 0)} 项维护建议。"
     else:
         summary = data.get("summary") or {}
         response = (

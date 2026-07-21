@@ -254,6 +254,21 @@ def get_note(note_id: str) -> dict[str, Any] | None:
     return item
 
 
+def list_notes_by_source(source_id: str) -> list[dict[str, Any]]:
+    with connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT n.* FROM knowledge_notes n
+            JOIN knowledge_note_sources ns ON ns.note_id = n.id
+            JOIN knowledge_profile_notes pn ON pn.note_id = n.id
+            WHERE ns.source_id = ? AND pn.profile_id = ? AND n.status != 'archived'
+            ORDER BY n.updated_at DESC
+            """,
+            (source_id, active_profile_id()),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def find_note_by_title(title: str) -> dict[str, Any] | None:
     with connect() as connection:
         row = connection.execute(

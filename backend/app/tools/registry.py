@@ -49,6 +49,7 @@ def register_default_tools() -> None:
         ingest_file_tool,
         ingest_text,
         lint,
+        semantic_lint,
         rebuild,
         review,
         search,
@@ -70,6 +71,7 @@ def register_default_tools() -> None:
         compile_source_tool,
         review,
         lint,
+        semantic_lint,
         rebuild,
     ]:
         tool_registry.register(tool)

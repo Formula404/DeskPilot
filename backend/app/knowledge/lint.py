@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 from typing import Any
+import json
+from openai import AsyncOpenAI
 
 from backend.app.db.connection import connect
 from backend.app.knowledge.indexer import indexed_object_ids
@@ -10,6 +12,11 @@ from backend.app.knowledge.markdown import parse_markdown_document, sha256_text,
 from backend.app.knowledge.models import NoteFrontmatter, SourceFrontmatter
 from backend.app.knowledge.paths import knowledge_root
 from backend.app.knowledge.source_service import detect_secret
+from backend.app.core.config import get_settings
+from backend.app.knowledge.repository import list_notes
+from backend.app.knowledge.indexer import read_indexed_note
+from backend.app.knowledge.catalog import append_log
+from backend.app.knowledge.settings import get_knowledge_settings
 
 
 def _issue(level: str, code: str, message: str, path: Path | None = None) -> dict[str, str]:
@@ -116,3 +123,35 @@ def lint_knowledge() -> dict[str, Any]:
         "issues": issues,
         "scanned": {"sources": len(snapshot_files), "notes": len(note_files)},
     }
+
+
+async def semantic_lint_knowledge() -> dict[str, Any]:
+    notes = list_notes(limit=500)
+    pages = []
+    inbound: Counter[str] = Counter()
+    for note in notes:
+        frontmatter, sections, _ = read_indexed_note(note)
+        for relation in note.get("relations", []):
+            inbound[str(relation["to_note_id"])] += 1
+        pages.append({"id": frontmatter.id, "title": frontmatter.title, "type": frontmatter.entity_type, "status": frontmatter.status, "summary": sections.get("Summary", "")[:500], "relations": [{"type": item["relation_type"], "target": item["to_note_id"]} for item in note.get("relations", [])]})
+    suggestions = [
+        {"level": "warning", "code": "ORPHAN_PAGE", "message": f"页面没有入链：{item['title']}", "note_id": item["id"]}
+        for item in pages if not inbound[item["id"]] and len(pages) > 1
+    ]
+    settings = get_settings()
+    model_used = False
+    model_pages = pages if get_knowledge_settings().allow_private_remote else [item for item in pages if next((note for note in notes if note["id"] == item["id"]), {}).get("sensitivity") != "private"]
+    if settings.openai_api_key and model_pages:
+        client = AsyncOpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url or "https://api.openai.com/v1")
+        try:
+            response = await client.chat.completions.create(
+                model=settings.openai_model, response_format={"type": "json_object"},
+                messages=[{"role": "system", "content": "你是 Wiki 语义维护器。仅基于输入页面，找出矛盾、过时主张、应合并页面、缺失概念、缺失交叉引用和研究空白。输出 JSON {issues:[{level,code,message,note_ids,recommended_action}]}，不要修改文件。"}, {"role": "user", "content": json.dumps({"pages": model_pages}, ensure_ascii=False)}],
+            )
+            payload = json.loads(response.choices[0].message.content or "{}")
+            suggestions.extend(item for item in payload.get("issues", []) if isinstance(item, dict))
+            model_used = True
+        except Exception:
+            __import__("logging").getLogger(__name__).exception("Semantic wiki lint failed")
+    append_log("semantic-lint", "Wiki health check", f"Found {len(suggestions)} semantic suggestions; model: {model_used}")
+    return {"issues": suggestions, "summary": {"issues": len(suggestions)}, "scanned": {"notes": len(notes)}, "model_used": model_used}

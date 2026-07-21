@@ -58,6 +58,7 @@ export interface KnowledgeWebWatch {
   interval_minutes: number;
   last_checked_at: string | null;
   last_changed_at: string | null;
+  next_check_at: string | null;
   last_status: string | null;
   last_error: string | null;
   title: string;
@@ -149,6 +150,7 @@ export interface KnowledgeSnapshotSummary {
 
 export interface KnowledgeSourceDetail extends KnowledgeSourceSummary {
   snapshots: KnowledgeSnapshotSummary[];
+  watch: KnowledgeWebWatch | null;
 }
 
 export interface KnowledgeSnapshotDetail extends KnowledgeSnapshotSummary {

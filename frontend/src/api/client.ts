@@ -161,6 +161,35 @@ export function exportObsidianVault(): Promise<{ vault_path: string; notes: numb
   return apiJson("/knowledge/obsidian/export", { method: "POST" });
 }
 
+export function chooseKnowledgeStorage(): Promise<{ path: string | null; cancelled: boolean }> {
+  return apiJson("/knowledge/storage/choose", { method: "POST" });
+}
+
+export function changeKnowledgeStorage(path: string): Promise<{ root_path: string; migrated: boolean; rebuild: Record<string, number> }> {
+  return apiJson("/knowledge/storage", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path })
+  });
+}
+
+export function openKnowledgeStorage(): Promise<{ ok: boolean }> {
+  return apiJson("/knowledge/storage/open", { method: "POST" });
+}
+
+export async function answerKnowledge(query: string): Promise<{ answer: string; results: KnowledgeNoteSummary[]; reading_level: string }> {
+  const result = await apiJson<{ answer: string; results: Array<KnowledgeNoteSummary & { path?: string }>; reading_level: string }>("/knowledge/query", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query, mode: "answer" }) });
+  return { ...result, results: result.results.map((item) => ({ ...item, markdown_path: item.markdown_path ?? item.path ?? "", updated_at: item.updated_at ?? "" })) };
+}
+
+export function promoteKnowledgeAnswer(title: string, answer: string, noteIds: string[]): Promise<KnowledgeNoteDetail> {
+  return apiJson("/knowledge/promote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, answer, note_ids: noteIds }) });
+}
+
+export function semanticLintKnowledge(): Promise<Record<string, unknown>> {
+  return apiJson("/knowledge/lint/semantic", { method: "POST" });
+}
+
 export function lintKnowledge(): Promise<KnowledgeLintResult> {
   return apiJson<KnowledgeLintResult>("/knowledge/lint", { method: "POST" });
 }
@@ -206,6 +235,14 @@ export function getKnowledgeNote(noteId: string): Promise<KnowledgeNoteDetail> {
   return apiJson<KnowledgeNoteDetail>(`/knowledge/notes/${noteId}`);
 }
 
+export function updateKnowledgeNote(noteId: string, payload: { title: string; entity_type: string; summary: string; overview: string; details: string; tags: string[] }): Promise<KnowledgeNoteDetail> {
+  return apiJson<KnowledgeNoteDetail>(`/knowledge/notes/${noteId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function deleteKnowledgeNote(noteId: string): Promise<{ id: string; title: string; deleted: boolean }> {
+  return apiJson(`/knowledge/notes/${noteId}`, { method: "DELETE" });
+}
+
 export async function getKnowledgeSources(params: {
   query?: string;
   sourceType?: string;
@@ -236,4 +273,8 @@ export function getKnowledgeProposal(proposalId: string): Promise<KnowledgePropo
 
 export function compileKnowledgeSource(sourceId: string): Promise<Record<string, unknown>> {
   return apiJson<Record<string, unknown>>(`/knowledge/sources/${sourceId}/compile`, { method: "POST" });
+}
+
+export function refreshKnowledgeNote(noteId: string): Promise<{ note_id: string; pending: unknown[]; results: Array<Record<string, unknown>> }> {
+  return apiJson(`/knowledge/notes/${noteId}/refresh`, { method: "POST" });
 }
