@@ -7,6 +7,15 @@
   --color-danger: #ef4444;
   --color-warning: #f59e0b;
   --focus-ring: rgba(77, 141, 255, 0.92);
+  --settings-text: #1f2937;
+  --settings-muted: #64748b;
+  --settings-border: #e5eaf2;
+  --settings-surface: #ffffff;
+  --settings-surface-soft: #f8fafc;
+  --settings-success: #16a34a;
+  --settings-success-soft: #dcfce7;
+  --settings-danger: #dc2626;
+  --settings-danger-soft: #fef2f2;
 
   --glass-border: rgba(202, 219, 255, 0.42);
   --glass-border-muted: rgba(202, 219, 255, 0.36);

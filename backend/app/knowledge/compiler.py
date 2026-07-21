@@ -7,7 +7,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from backend.app.core.config import get_settings
+from backend.app.settings.service import get_runtime_settings as get_settings
 from backend.app.db.repository import new_id, now_iso
 from backend.app.knowledge.indexer import index_note_path, search_index
 from backend.app.knowledge.markdown import (
@@ -138,10 +138,12 @@ async def _model_proposal(
     }
     client = AsyncOpenAI(
         api_key=app_settings.openai_api_key,
-        base_url=app_settings.openai_base_url or "https://api.openai.com/v1",
+        base_url=app_settings.openai_base_url,
+        timeout=getattr(app_settings, "request_timeout_seconds", 60),
     )
     response = await client.chat.completions.create(
         model=app_settings.openai_model,
+        temperature=getattr(app_settings, "temperature", 0.2),
         response_format={"type": "json_object"},
         messages=[
             {

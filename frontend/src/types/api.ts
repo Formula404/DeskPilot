@@ -3,6 +3,31 @@ export interface ChatResponse {
   status: string;
 }
 
+export interface ApplicationSettings {
+  schema_version: number;
+  ai: {
+    provider: "openai_compatible";
+    base_url: string;
+    model: string;
+    temperature: number;
+    request_timeout_seconds: number;
+    api_key_configured: boolean;
+    api_key_hint: string | null;
+  };
+  general: {
+    response_language: "zh-CN" | "en";
+    motion_mode: "system" | "reduced" | "full";
+  };
+}
+
+export interface ApplicationSettingsUpdate {
+  schema_version: number;
+  ai: Omit<ApplicationSettings["ai"], "api_key_configured" | "api_key_hint"> & {
+    api_key: string | null;
+  };
+  general: ApplicationSettings["general"];
+}
+
 export interface TaskEvent {
   event_id: string;
   task_id: string | null;

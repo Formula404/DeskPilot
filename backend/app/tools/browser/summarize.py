@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from openai import AsyncOpenAI
 
-from backend.app.core.config import get_settings
+from backend.app.settings.service import get_runtime_settings as get_settings
 from backend.app.schemas.common import ToolError, ToolResult
 from backend.app.tools.base import ToolDefinition
 
@@ -24,15 +24,17 @@ async def _handler(payload: dict) -> ToolResult:
         return ToolResult(
             ok=True,
             data={"summary": summary},
-            message="未配置 OPENAI_API_KEY，已生成本地占位总结。",
+            message="未配置 AI API Key，已生成本地占位总结。",
         )
 
     client = AsyncOpenAI(
         api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url or "https://api.openai.com/v1",
+        base_url=settings.openai_base_url,
+        timeout=getattr(settings, "request_timeout_seconds", 60),
     )
     response = await client.chat.completions.create(
         model=settings.openai_model,
+        temperature=getattr(settings, "temperature", 0.2),
         messages=[
             {
                 "role": "system",

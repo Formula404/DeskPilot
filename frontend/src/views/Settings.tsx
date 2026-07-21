@@ -1,4 +1,4 @@
-import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
+import { MouseEvent as ReactMouseEvent, useCallback, useRef, useState } from "react";
 import { Window } from "@tauri-apps/api/window";
 import { BookOpen, Bot, Clock3, Copy, Info, Keyboard, PanelRight, Settings, ShieldCheck, User, X } from "lucide-react";
 import deskpilotLogo from "../assets/deskpilot-logo.png";
@@ -8,6 +8,7 @@ import { useReducedMotion } from "../motion/useReducedMotion";
 import { useWindowLifecycle } from "../hooks/useWindowLifecycle";
 import { hideCurrentWindow, isTauriRuntime } from "./windowActions";
 import { KnowledgeSettingsPanel } from "./KnowledgeSettings";
+import { ApplicationSettingsPanel } from "./ApplicationSettings";
 
 const settingsNav = [
   { label: "账号", icon: User },
@@ -250,7 +251,11 @@ export function SettingsView() {
         <div className="settings-card" data-motion="settings-card" data-no-window-drag>
           <div data-motion="settings-card-body">
             <h1>{displayedActive}</h1>
-            {displayedActive === "账号" ? <AccountSettings /> : displayedActive === "知识库" ? <KnowledgeSettingsPanel /> : <GenericSettings active={displayedActive} />}
+            {displayedActive === "账号" ? <AccountSettings />
+              : displayedActive === "知识库" ? <KnowledgeSettingsPanel />
+              : displayedActive === "AI 设置" ? <ApplicationSettingsPanel section="ai" />
+              : displayedActive === "通用" ? <ApplicationSettingsPanel section="general" />
+              : <GenericSettings active={displayedActive} />}
           </div>
         </div>
       </section>
@@ -264,74 +269,40 @@ function AccountSettings() {
       <div className="profile-summary" data-motion="settings-page-item">
         <div className="avatar" data-motion="settings-page-item">D</div>
         <div>
-          <h2>本地模式 <span>本地</span></h2>
-          <p>数据仅保存在此设备</p>
+          <h2>本地工作区 <span>本地</span></h2>
+          <p>任务、知识库和用户设置仅保存在此设备</p>
         </div>
       </div>
 
       <div className="settings-list">
         <div className="settings-list-row" data-motion="settings-page-item">
           <User size={18} />
-          <span>用户名</span>
-          <strong>Demo User</strong>
+          <span>身份模式</span>
+          <strong>无需登录</strong>
         </div>
         <div className="settings-list-row" data-motion="settings-page-item">
           <Copy size={18} />
-          <span>本地用户 ID</span>
-          <strong>a1e4f7b2-6d9c-4f18-b8d3</strong>
+          <span>敏感配置</span>
+          <strong>Windows 用户级加密</strong>
         </div>
         <div className="settings-list-row" data-motion="settings-page-item">
           <Clock3 size={18} />
-          <span>模型服务状态</span>
-          <strong className="is-running">运行中</strong>
+          <span>模型服务</span>
+          <strong>在 AI 设置中管理</strong>
         </div>
-      </div>
-      <div className="settings-pagination" data-motion="settings-page-item">
-        <span className="is-active" />
-        <span />
-        <span />
-        <span />
-        <span />
       </div>
     </div>
   );
 }
 
 function GenericSettings({ active }: { active: string }) {
-  const toggleRef = useRef<HTMLButtonElement | null>(null);
-  const [enabled, setEnabled] = useState(true);
-
-  useEffect(() => {
-    gsap.to(toggleRef.current ?? [], {
-      backgroundColor: enabled ? "var(--color-accent)" : "#cbd5e1",
-      duration: motion.duration.base,
-      ease: motion.ease.out
-    });
-    gsap.to(toggleRef.current?.querySelector("[data-motion='toggle-knob']") ?? [], {
-      x: enabled ? 18 : 0,
-      duration: motion.duration.base,
-      ease: motion.ease.out
-    });
-  }, [enabled]);
-
   return (
     <div className="generic-settings">
       <div className="empty-setting-icon" data-motion="settings-page-item">
         <Settings size={30} />
       </div>
       <h2 data-motion="settings-page-item">{active}配置</h2>
-      <p data-motion="settings-page-item">这里用于承载 {active} 的配置项。第一版先完成页面结构，后续接入真实设置读写。</p>
-      <div className="setting-toggle-row" data-motion="settings-page-item">
-        <span>启用此模块</span>
-        <button
-          ref={toggleRef}
-          className={enabled ? "toggle is-on" : "toggle"}
-          aria-label="启用此模块"
-          onClick={() => setEnabled((value) => !value)}
-        >
-          <span className="toggle-knob" data-motion="toggle-knob" />
-        </button>
-      </div>
+      <p data-motion="settings-page-item">{active}相关能力尚未开放，后续会沿用统一的版本化设置模型接入。</p>
     </div>
   );
 }

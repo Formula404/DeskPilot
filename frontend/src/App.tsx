@@ -1,4 +1,7 @@
+import { useEffect } from "react";
+import { getApplicationSettings } from "./api/client";
 import { useWindowView } from "./hooks/useWindowView";
+import { applyRuntimePreferences } from "./settings/runtimePreferences";
 import { FloatingBallView } from "./views/FloatingBall";
 import { ContextMenuView } from "./views/ContextMenu";
 import { OverlayView } from "./views/Overlay";
@@ -7,6 +10,12 @@ import { KnowledgeWorkspaceView } from "./views/KnowledgeWorkspace";
 
 export function App() {
   const view = useWindowView();
+
+  useEffect(() => {
+    getApplicationSettings().then(applyRuntimePreferences).catch(() => {
+      // The backend can still be starting while a Tauri window mounts.
+    });
+  }, []);
 
   if (view === "floating-ball") {
     return <FloatingBallView />;

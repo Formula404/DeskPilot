@@ -49,8 +49,8 @@ from fastapi import FastAPI
 
 ## 配置
 
-- `.env` 存放本地密钥和地址
-- 用户配置存入 SQLite `settings` 表
+- `.env` 只存放服务启动参数（监听地址、端口、数据目录）
+- AI API 与用户偏好存入 SQLite `settings` 表；Windows 下密钥使用当前用户 DPAPI 加密
 - 文件路径统一使用 `pathlib.Path`
 
 ## 测试

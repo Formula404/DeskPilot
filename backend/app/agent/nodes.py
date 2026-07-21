@@ -11,7 +11,7 @@ from backend.app.agent.tool_calling import (
     run_web_page_summary_tool_agent,
     run_web_table_export_tool_agent,
 )
-from backend.app.core.config import get_settings
+from backend.app.settings.service import get_runtime_settings as get_settings
 from backend.app.db.repository import add_task_step, update_task
 from backend.app.schemas.common import ToolResult
 from backend.app.tools.registry import tool_registry
@@ -238,24 +238,29 @@ async def general_chat(state: AgentState) -> AgentState:
     if not settings.openai_api_key:
         return {
             **state,
-            "final_response": "未配置 API Key，无法进行对话。请在 .env 中设置 OPENAI_API_KEY。",
-            "error": "未配置 API Key，无法进行对话。请在 .env 中设置 OPENAI_API_KEY。",
+            "final_response": "未配置 API Key，无法进行对话。请在设置 → AI 设置中完成配置。",
+            "error": "未配置 API Key，无法进行对话。请在设置 → AI 设置中完成配置。",
         }
 
+    response_language = getattr(getattr(settings, "general", None), "response_language", "zh-CN")
+    system_prompt = (
+        "You are DeskPilot, a personal desktop assistant. Reply concisely and helpfully in English. "
+        "Ask a clarifying question when the request is ambiguous."
+        if response_language == "en"
+        else "你是 DeskPilot，一个个人桌面助手。请用中文简洁、友好地回答用户的问题。如果用户的问题不明确，可以追问。"
+    )
     client = AsyncOpenAI(
         api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url or "https://api.openai.com/v1",
+        base_url=settings.openai_base_url,
+        timeout=getattr(settings, "request_timeout_seconds", 60),
     )
     response = await client.chat.completions.create(
         model=settings.openai_model,
+        temperature=getattr(settings, "temperature", 0.2),
         messages=[
             {
                 "role": "system",
-                "content": (
-                    "你是 DeskPilot，一个个人桌面助手。"
-                    "请用中文简洁、友好地回答用户的问题。"
-                    "如果用户的问题不明确，可以追问。"
-                ),
+                "content": system_prompt,
             },
             {"role": "user", "content": state["user_input"]},
         ],

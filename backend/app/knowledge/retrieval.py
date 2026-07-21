@@ -5,7 +5,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from backend.app.core.config import get_settings
+from backend.app.settings.service import get_runtime_settings as get_settings
 from backend.app.knowledge.indexer import read_indexed_note, search_index
 from backend.app.knowledge.repository import expand_note_relations, get_note, get_snapshot, list_notes_by_source, list_source_snapshots
 from backend.app.knowledge.settings import get_knowledge_settings
@@ -179,10 +179,12 @@ async def answer_knowledge(query: str, limit: int | None = None) -> dict[str, An
 
     client = AsyncOpenAI(
         api_key=app_settings.openai_api_key,
-        base_url=app_settings.openai_base_url or "https://api.openai.com/v1",
+        base_url=app_settings.openai_base_url,
+        timeout=getattr(app_settings, "request_timeout_seconds", 60),
     )
     response = await client.chat.completions.create(
         model=app_settings.openai_model,
+        temperature=getattr(app_settings, "temperature", 0.2),
         messages=[
             {
                 "role": "system",

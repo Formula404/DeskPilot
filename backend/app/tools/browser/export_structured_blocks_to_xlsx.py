@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 from openpyxl import Workbook
 
 from backend.app.browser.bridge import BrowserBridgeError, browser_bridge
-from backend.app.core.config import get_settings
+from backend.app.settings.service import get_runtime_settings as get_settings
 from backend.app.core.paths import data_dir
 from backend.app.db.repository import now_iso
 from backend.app.schemas.common import Artifact, ToolError, ToolResult
@@ -97,10 +97,12 @@ async def _select_candidate_with_model(
 
     client = AsyncOpenAI(
         api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url or "https://api.openai.com/v1",
+        base_url=settings.openai_base_url,
+        timeout=getattr(settings, "request_timeout_seconds", 60),
     )
     response = await client.chat.completions.create(
         model=settings.openai_model,
+        temperature=getattr(settings, "temperature", 0.2),
         response_format={"type": "json_object"},
         messages=[
             {

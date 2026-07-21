@@ -1,4 +1,6 @@
 import type {
+  ApplicationSettings,
+  ApplicationSettingsUpdate,
   ChatResponse,
   KnowledgeLintResult,
   KnowledgeJob,
@@ -19,6 +21,22 @@ import type {
 } from "../types/api";
 
 const API_BASE = "http://127.0.0.1:8765";
+
+export function getApplicationSettings(): Promise<ApplicationSettings> {
+  return apiJson<ApplicationSettings>("/settings");
+}
+
+export function updateApplicationSettings(settings: ApplicationSettingsUpdate): Promise<ApplicationSettings> {
+  return apiJson<ApplicationSettings>("/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings)
+  });
+}
+
+export function testAIConnection(): Promise<{ ok: boolean; message: string }> {
+  return apiJson<{ ok: boolean; message: string }>("/settings/ai/test", { method: "POST" });
+}
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, init);

@@ -13,7 +13,7 @@ from backend.app.knowledge.markdown import atomic_write, parse_markdown_document
 from backend.app.knowledge.models import EvidenceItem, NoteFrontmatter, SourceFrontmatter
 from backend.app.knowledge.paths import knowledge_root, profile_workspace
 from backend.app.knowledge.source_service import detect_secret
-from backend.app.core.config import get_settings
+from backend.app.settings.service import get_runtime_settings as get_settings
 from backend.app.knowledge.repository import get_note, list_notes, upsert_note
 from backend.app.knowledge.indexer import index_note_path, read_indexed_note
 from backend.app.knowledge.catalog import append_log
@@ -158,10 +158,10 @@ async def semantic_lint_knowledge() -> dict[str, Any]:
     model_used = False
     model_pages = pages if get_knowledge_settings().allow_private_remote else [item for item in pages if next((note for note in notes if note["id"] == item["id"]), {}).get("sensitivity") != "private"]
     if settings.openai_api_key and model_pages:
-        client = AsyncOpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url or "https://api.openai.com/v1")
+        client = AsyncOpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url, timeout=getattr(settings, "request_timeout_seconds", 60))
         try:
             response = await client.chat.completions.create(
-                model=settings.openai_model, response_format={"type": "json_object"},
+                model=settings.openai_model, temperature=getattr(settings, "temperature", 0.2), response_format={"type": "json_object"},
                 messages=[{"role": "system", "content": "你是 Wiki 语义维护器。仅基于输入页面，找出矛盾、过时主张、应合并页面、缺失概念、缺失交叉引用和研究空白。输出 JSON {issues:[{level,code,message,note_ids,recommended_action}]}，不要修改文件。"}, {"role": "user", "content": json.dumps({"pages": model_pages}, ensure_ascii=False)}],
             )
             payload = json.loads(response.choices[0].message.content or "{}")

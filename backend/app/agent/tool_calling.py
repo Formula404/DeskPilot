@@ -7,7 +7,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from backend.app.core.config import get_settings
+from backend.app.settings.service import get_runtime_settings as get_settings
 from backend.app.db.repository import add_task_step
 from backend.app.schemas.common import ToolResult
 from backend.app.tools.registry import tool_registry
@@ -161,11 +161,12 @@ async def _run_tool_agent(
 ) -> dict[str, Any]:
     settings = get_settings()
     if not settings.openai_api_key:
-        raise ToolCallingError("未配置 OPENAI_API_KEY，无法运行 tool calling Agent。")
+        raise ToolCallingError("未配置 API Key，请在设置 → AI 设置中完成配置。")
 
     client = AsyncOpenAI(
         api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url or "https://api.openai.com/v1",
+        base_url=settings.openai_base_url,
+        timeout=getattr(settings, "request_timeout_seconds", 60),
     )
     tools = tool_registry.openai_tools(allowed_tools)
     messages: list[dict[str, Any]] = [
@@ -179,6 +180,7 @@ async def _run_tool_agent(
     for _ in range(max_steps):
         response = await client.chat.completions.create(
             model=settings.openai_model,
+            temperature=getattr(settings, "temperature", 0.2),
             messages=messages,
             tools=tools,
             tool_choice="auto",

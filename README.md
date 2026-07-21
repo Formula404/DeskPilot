@@ -62,6 +62,12 @@ cd browser-extension && npm install && npm run build
 # Chrome/Edge → 扩展管理 → 加载已解压的扩展 → 选择 browser-extension/dist
 ```
 
+### 配置 AI 模型
+
+启动后从悬浮球菜单打开「设置 → AI 设置」，填写 OpenAI 或 OpenAI 兼容服务的 API 地址、API Key、模型、温度和请求超时，然后保存并测试连接。AI 运行参数不再依赖 `.env`；Windows 下 API Key 会用当前登录用户的 DPAPI 加密后存入本地 SQLite，接口不会回传明文。
+
+`.env` 仅保留服务启动参数，例如 `DESKPILOT_HOST`、`DESKPILOT_PORT` 和 `DESKPILOT_DATA_DIR`。
+
 ### Tauri 开发环境依赖
 
 `npm run dev` 只需要 Node/npm，适合先看前端网页界面。
