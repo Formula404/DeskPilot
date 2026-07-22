@@ -6,6 +6,7 @@ from typing import Any
 from openpyxl import Workbook
 
 from backend.app.browser.bridge import BrowserBridgeError, browser_bridge
+from backend.app.context.runtime_binding import current_browser_target
 from backend.app.core.paths import data_dir
 from backend.app.db.repository import now_iso
 from backend.app.schemas.common import Artifact, ToolError, ToolResult
@@ -33,7 +34,7 @@ async def _handler(payload: dict) -> ToolResult:
     table_index = payload.get("table_index")
 
     try:
-        extracted = await browser_bridge.extract_tables()
+        extracted = await browser_bridge.extract_tables(target=current_browser_target())
     except BrowserBridgeError as exc:
         return ToolResult(
             ok=False,

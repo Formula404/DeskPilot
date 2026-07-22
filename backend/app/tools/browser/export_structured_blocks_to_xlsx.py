@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 from openpyxl import Workbook
 
 from backend.app.browser.bridge import BrowserBridgeError, browser_bridge
+from backend.app.context.runtime_binding import current_browser_target
 from backend.app.settings.service import get_runtime_settings as get_settings
 from backend.app.core.paths import data_dir
 from backend.app.db.repository import now_iso
@@ -169,7 +170,7 @@ async def _handler(payload: dict) -> ToolResult:
     instruction = str(payload.get("instruction") or "导出当前网页中的结构化信息")
 
     try:
-        extracted = await browser_bridge.extract_structured_blocks()
+        extracted = await browser_bridge.extract_structured_blocks(target=current_browser_target())
     except BrowserBridgeError as exc:
         return ToolResult(
             ok=False,

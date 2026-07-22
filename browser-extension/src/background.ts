@@ -146,6 +146,31 @@ async function collectPage(command: BrowserCommand) {
   };
 }
 
+async function collectMetadata(command: BrowserCommand) {
+  const tab = await getTargetTab(command);
+  if (!tab.id || !tab.url?.startsWith("http")) {
+    throw new Error("当前标签页不是可读取的普通网页，请切换到 http/https 页面后重试。");
+  }
+  let selectionText = "";
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => window.getSelection()?.toString().slice(0, 8000) ?? "",
+    });
+    selectionText = String(results[0]?.result ?? "");
+  } catch {
+    // Restricted pages can still provide stable tab metadata.
+  }
+  return {
+    tab_id: tab.id,
+    url: tab.url,
+    title: tab.title ?? "",
+    document_id: `${tab.id}:${tab.url}`,
+    selection_text: selectionText,
+    captured_at: new Date().toISOString(),
+  };
+}
+
 async function extractTable(command: BrowserCommand) {
   const tab = await getTargetTab(command);
   if (!tab.id || !tab.url?.startsWith("http")) {
@@ -172,7 +197,7 @@ async function extractStructuredBlocks(command: BrowserCommand) {
 
 async function handleCommand(command: BrowserCommand): Promise<BrowserResult> {
   try {
-    if (!["collect_page", "extract_table", "extract_structured_blocks"].includes(command.command)) {
+    if (!["collect_metadata", "collect_page", "extract_table", "extract_structured_blocks"].includes(command.command)) {
       return {
         type: "browser.result",
         request_id: command.request_id,
@@ -187,7 +212,9 @@ async function handleCommand(command: BrowserCommand): Promise<BrowserResult> {
     }
 
     let data: unknown;
-    if (command.command === "collect_page") {
+    if (command.command === "collect_metadata") {
+      data = await collectMetadata(command);
+    } else if (command.command === "collect_page") {
       data = await collectPage(command);
     } else if (command.command === "extract_table") {
       data = await extractTable(command);

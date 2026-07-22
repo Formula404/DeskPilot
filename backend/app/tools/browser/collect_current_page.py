@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backend.app.browser.bridge import BrowserBridgeError, browser_bridge
+from backend.app.context.runtime_binding import current_browser_target
 from backend.app.db.repository import now_iso, save_browser_context
 from backend.app.schemas.common import ToolError, ToolResult
 from backend.app.tools.base import ToolDefinition
@@ -8,7 +9,8 @@ from backend.app.tools.base import ToolDefinition
 
 async def _handler(_: dict) -> ToolResult:
     try:
-        page = await browser_bridge.collect_page()
+        target = current_browser_target()
+        page = await browser_bridge.collect_page(target=target)
     except BrowserBridgeError as exc:
         return ToolResult(
             ok=False,
@@ -23,6 +25,24 @@ async def _handler(_: dict) -> ToolResult:
             message="浏览器扩展未返回有效 URL。",
             error=ToolError(code="INVALID_BROWSER_CONTEXT"),
         )
+    if target:
+        expected_tab = target.get("tab")
+        expected_url = target.get("url")
+        if expected_tab is not None and str(page.get("tab_id")) != str(expected_tab):
+            return ToolResult(
+                ok=False,
+                message="浏览器返回的标签页与任务快照不一致，已阻止目标漂移。",
+                error=ToolError(code="BROWSER_TARGET_CHANGED"),
+            )
+        if expected_url and page.get("url") != expected_url:
+            return ToolResult(
+                ok=False,
+                message="任务绑定的网页已跳转或关闭，请重新确认目标后再执行。",
+                error=ToolError(
+                    code="BROWSER_TARGET_CHANGED",
+                    detail={"expected_url": expected_url, "actual_url": page.get("url")},
+                ),
+            )
 
     context_id = save_browser_context(
         tab_id=str(page.get("tab_id")) if page.get("tab_id") is not None else None,

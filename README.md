@@ -166,5 +166,6 @@ DeskPilot/
 - [开发规范](report/开发规范.md)
 - [接口协议](report/接口与事件协议.md)
 - [数据库设计](report/数据库与记忆设计.md)
+- [上下文工程设计](report/上下文工程设计.md)
 - [项目骨架](report/项目骨架设计.md)
 - [第一阶段任务](report/第一阶段任务清单.md)

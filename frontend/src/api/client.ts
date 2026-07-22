@@ -17,7 +17,11 @@ import type {
   KnowledgeWebWatch,
   KnowledgeQueryMode,
   KnowledgeQueryResult,
-  TaskEvent
+  TaskEvent,
+  SessionResponse,
+  ContextSnapshotResponse,
+  ContextDataOverview,
+  MemoryOverview
 } from "../types/api";
 
 const API_BASE = "http://127.0.0.1:8765";
@@ -53,16 +57,81 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
-export async function createTask(message: string): Promise<ChatResponse> {
+export function createSession(): Promise<SessionResponse> {
+  return apiJson<SessionResponse>("/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source: "floating_window" })
+  });
+}
+
+export function createContextSnapshot(sessionId: string): Promise<ContextSnapshotResponse> {
+  return apiJson<ContextSnapshotResponse>("/context/snapshots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      source: "floating_window",
+      include: ["window", "browser_metadata", "selection"]
+    })
+  });
+}
+
+export function getContextData(): Promise<ContextDataOverview> {
+  return apiJson<ContextDataOverview>("/context/data");
+}
+
+export function getMemories(): Promise<MemoryOverview> {
+  return apiJson<MemoryOverview>("/memories");
+}
+
+export function deleteSession(sessionId: string): Promise<{ ok: boolean }> {
+  return apiJson(`/sessions/${sessionId}`, { method: "DELETE" });
+}
+
+export function deleteContextSnapshot(snapshotId: string): Promise<{ ok: boolean }> {
+  return apiJson(`/context/snapshots/${snapshotId}`, { method: "DELETE" });
+}
+
+export function deleteMemory(memoryId: string): Promise<{ ok: boolean }> {
+  return apiJson(`/memories/${memoryId}`, { method: "DELETE" });
+}
+
+export async function createTask(
+  message: string,
+  sessionId: string,
+  contextSnapshotId: string
+): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, source: "floating_window" })
+    body: JSON.stringify({
+      message,
+      source: "floating_window",
+      session_id: sessionId,
+      context_snapshot_id: contextSnapshotId
+    })
   });
   if (!response.ok) {
     throw new Error(`Failed to create task: ${response.status}`);
   }
   return response.json();
+}
+
+export function openArtifactFile(path: string): Promise<{ ok: boolean; path: string }> {
+  return apiJson("/artifacts/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path })
+  });
+}
+
+export function revealArtifactFile(path: string): Promise<{ ok: boolean; path: string }> {
+  return apiJson("/artifacts/reveal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path })
+  });
 }
 
 export async function cancelTask(taskId: string): Promise<void> {
@@ -82,8 +151,14 @@ export function openEventStream(
   const source = new EventSource(`${API_BASE}/events`);
   const eventTypes = [
     "task.created",
+    "context.snapshot.created",
+    "context.loading",
+    "context.ready",
+    "context.degraded",
+    "context.target_changed",
     "task.started",
     "task.plan.updated",
+    "task.step.started",
     "task.step.completed",
     "task.step.failed",
     "tool.started",

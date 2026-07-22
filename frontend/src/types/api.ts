@@ -1,6 +1,51 @@
 export interface ChatResponse {
   task_id: string;
   status: string;
+  session_id: string;
+  context_snapshot_id: string | null;
+}
+
+export interface SessionResponse {
+  session_id: string;
+  status: string;
+}
+
+export interface ContextSnapshotResponse {
+  context_snapshot_id: string;
+  captured_at: string;
+  expires_at: string | null;
+  available: { window: boolean; browser: boolean; selection: boolean };
+  degraded_reasons: string[];
+}
+
+export interface ContextDataOverview {
+  counts: { sessions: number; snapshots: number };
+  sessions: Array<{ id: string; title: string | null; status: string; updated_at: string }>;
+  snapshots: Array<{
+    id: string;
+    session_id: string | null;
+    source: string;
+    browser: { tab_id?: string; url?: string; title?: string };
+    sensitivity: string;
+    captured_at: string;
+    expires_at: string | null;
+  }>;
+}
+
+export interface MemoryOverview {
+  items: Array<{
+    id: string;
+    kind: string;
+    content: string;
+    sensitivity: string;
+    status: string;
+    updated_at: string;
+  }>;
+}
+
+export interface TaskArtifact {
+  type: string;
+  path: string;
 }
 
 export interface ApplicationSettings {

@@ -44,7 +44,8 @@ $RECYCLE.BIN/
 coverage/
 frontend/test-results/
 frontend/playwright-report/
-report/
+report/*
+!report/上下文工程设计.md
 
 # Python type checking
 .mypy_cache/

@@ -1283,7 +1283,11 @@
   color: rgba(124, 170, 255, 0.94);
 }
 
-.assistant-response strong {
+.assistant-response>div {
+  min-width: 0;
+}
+
+.assistant-response-author {
   color: rgba(242, 246, 255, 0.9);
   font-size: 11px;
 }
@@ -1298,6 +1302,274 @@
 
 .assistant-response.is-running p {
   color: rgba(164, 194, 255, 0.86);
+}
+
+.assistant-markdown {
+  min-width: 0;
+  margin-top: 5px;
+  color: rgba(220, 232, 250, 0.82);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.assistant-markdown-loading {
+  margin-top: 5px;
+  color: rgba(220, 232, 250, 0.54);
+  font-size: 11px;
+}
+
+.assistant-markdown > :first-child {
+  margin-top: 0;
+}
+
+.assistant-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.assistant-markdown h1,
+.assistant-markdown h2,
+.assistant-markdown h3,
+.assistant-markdown h4 {
+  margin: 14px 0 6px;
+  color: rgba(245, 249, 255, 0.96);
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.assistant-markdown h1 { font-size: 16px; }
+.assistant-markdown h2 { font-size: 14px; }
+.assistant-markdown h3,
+.assistant-markdown h4 { font-size: 13px; }
+
+.assistant-markdown p {
+  margin: 7px 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: normal;
+}
+
+.assistant-markdown strong {
+  color: rgba(245, 249, 255, 0.94);
+  font-size: inherit;
+  font-weight: 720;
+}
+
+.assistant-markdown ul,
+.assistant-markdown ol {
+  margin: 7px 0;
+  padding-left: 20px;
+}
+
+.assistant-markdown li {
+  margin: 3px 0;
+  padding-left: 1px;
+}
+
+.assistant-markdown li::marker {
+  color: rgba(124, 170, 255, 0.9);
+}
+
+.assistant-markdown input[type="checkbox"] {
+  margin: 0 5px 0 0;
+  accent-color: var(--color-accent);
+}
+
+.assistant-markdown blockquote {
+  margin: 9px 0;
+  border-left: 2px solid rgba(124, 170, 255, 0.58);
+  background: rgba(124, 170, 255, 0.07);
+  padding: 6px 9px;
+  color: rgba(205, 219, 242, 0.76);
+}
+
+.assistant-markdown code {
+  border: 1px solid rgba(202, 219, 255, 0.13);
+  border-radius: 5px;
+  background: rgba(7, 12, 24, 0.32);
+  padding: 1px 4px;
+  color: rgba(181, 211, 255, 0.96);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+
+.assistant-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 9px 0;
+  border: 1px solid rgba(202, 219, 255, 0.14);
+  border-radius: 9px;
+  background: rgba(5, 10, 21, 0.48);
+  padding: 9px 10px;
+  scrollbar-color: rgba(202, 219, 255, 0.24) transparent;
+  scrollbar-width: thin;
+}
+
+.assistant-markdown pre code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: rgba(220, 232, 250, 0.88);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.assistant-markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 9px 0;
+  border-collapse: collapse;
+  scrollbar-color: rgba(202, 219, 255, 0.24) transparent;
+  scrollbar-width: thin;
+}
+
+.assistant-markdown th,
+.assistant-markdown td {
+  min-width: 74px;
+  border: 1px solid rgba(202, 219, 255, 0.16);
+  padding: 5px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.assistant-markdown th {
+  background: rgba(124, 170, 255, 0.1);
+  color: rgba(245, 249, 255, 0.92);
+  font-weight: 680;
+}
+
+.assistant-markdown hr {
+  height: 1px;
+  margin: 12px 0;
+  border: 0;
+  background: linear-gradient(90deg, rgba(202, 219, 255, 0.08), rgba(202, 219, 255, 0.3), rgba(202, 219, 255, 0.08));
+}
+
+.assistant-markdown a {
+  color: rgba(139, 181, 255, 0.98);
+  text-decoration-color: rgba(139, 181, 255, 0.45);
+  text-underline-offset: 2px;
+}
+
+.assistant-markdown a:hover {
+  color: rgba(190, 214, 255, 1);
+  text-decoration-color: currentColor;
+}
+
+.assistant-artifacts {
+  display: grid;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.assistant-artifacts-heading {
+  color: rgba(205, 219, 242, 0.54);
+  font-size: 9px;
+  font-weight: 680;
+  letter-spacing: 0.04em;
+}
+
+.assistant-artifact-link {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 31px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(124, 170, 255, 0.2);
+  border-radius: 10px;
+  background:
+    linear-gradient(130deg, rgba(124, 170, 255, 0.1), rgba(255, 255, 255, 0.035)),
+    rgba(20, 30, 50, 0.28);
+  padding: 7px 8px;
+  color: rgba(220, 232, 250, 0.78);
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.assistant-artifact-link:hover {
+  border-color: rgba(124, 170, 255, 0.46);
+  background:
+    linear-gradient(130deg, rgba(124, 170, 255, 0.16), rgba(255, 255, 255, 0.055)),
+    rgba(20, 30, 50, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.assistant-artifact-link>svg {
+  color: rgba(139, 181, 255, 0.68);
+}
+
+.assistant-artifact-icon {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border: 1px solid rgba(124, 170, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(45, 109, 246, 0.12);
+  color: rgba(139, 181, 255, 0.94);
+}
+
+.assistant-artifact-copy {
+  min-width: 0;
+}
+
+.assistant-artifact-copy strong,
+.assistant-artifact-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-artifact-copy strong {
+  color: rgba(242, 246, 255, 0.9);
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.assistant-artifact-copy small {
+  margin-top: 2px;
+  color: rgba(205, 219, 242, 0.46);
+  font-size: 8px;
+}
+
+.assistant-artifact-menu {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  width: 206px;
+  overflow: hidden;
+  border: 1px solid rgba(202, 219, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(19, 27, 44, 0.97);
+  box-shadow: 0 16px 34px rgba(0, 8, 24, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  padding: 4px;
+  backdrop-filter: blur(22px) saturate(1.4);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+}
+
+.assistant-artifact-menu button {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 6px 8px;
+  color: rgba(229, 238, 252, 0.78);
+  font-size: 10px;
+  text-align: left;
+}
+
+.assistant-artifact-menu button:hover {
+  background: rgba(124, 170, 255, 0.12);
+  color: rgba(245, 249, 255, 0.96);
 }
 
 .assistant-error {

@@ -9,6 +9,7 @@ import { useWindowLifecycle } from "../hooks/useWindowLifecycle";
 import { hideCurrentWindow, isTauriRuntime } from "./windowActions";
 import { KnowledgeSettingsPanel } from "./KnowledgeSettings";
 import { ApplicationSettingsPanel } from "./ApplicationSettings";
+import { ContextPrivacySettingsPanel } from "./ContextPrivacySettings";
 
 const settingsNav = [
   { label: "账号", icon: User },
@@ -255,6 +256,7 @@ export function SettingsView() {
               : displayedActive === "知识库" ? <KnowledgeSettingsPanel />
               : displayedActive === "AI 设置" ? <ApplicationSettingsPanel section="ai" />
               : displayedActive === "通用" ? <ApplicationSettingsPanel section="general" />
+              : displayedActive === "上下文权限" ? <ContextPrivacySettingsPanel />
               : <GenericSettings active={displayedActive} />}
           </div>
         </div>

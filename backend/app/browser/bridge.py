@@ -23,6 +23,17 @@ class BrowserBridge:
     def is_connected(self) -> bool:
         return self._websocket is not None
 
+    @staticmethod
+    def _validate_target(data: dict[str, Any], target: dict[str, Any] | None) -> None:
+        if not target:
+            return
+        expected_tab = target.get("tab")
+        expected_url = target.get("url")
+        if expected_tab is not None and str(data.get("tab_id")) != str(expected_tab):
+            raise BrowserBridgeError("浏览器返回的标签页与任务快照不一致，已阻止目标漂移。")
+        if expected_url and data.get("url") != expected_url:
+            raise BrowserBridgeError("任务绑定的网页已跳转或关闭，请重新确认目标后再执行。")
+
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
         async with self._lock:
@@ -104,9 +115,24 @@ class BrowserBridge:
                 future.exception()
             self._pending.pop(request_id, None)
 
-    async def collect_page(self, timeout: float = 8.0) -> dict[str, Any]:
+    async def collect_metadata(self, timeout: float = 2.0) -> dict[str, Any]:
+        result = await self.command("collect_metadata", timeout=timeout)
+        if not result.get("ok"):
+            error = result.get("error") or {}
+            raise BrowserBridgeError(error.get("message") or "浏览器扩展采集页面元数据失败。")
+        data = result.get("data")
+        if not isinstance(data, dict):
+            raise BrowserBridgeError("浏览器扩展返回了无效的页面元数据。")
+        if self.client_info:
+            data.setdefault("client_id", self.client_info.get("client_id"))
+        return data
+
+    async def collect_page(
+        self, *, target: dict[str, Any] | None = None, timeout: float = 8.0
+    ) -> dict[str, Any]:
         result = await self.command(
             "collect_page",
+            target=target,
             payload={
                 "include_visible_text": True,
                 "include_dom_summary": True,
@@ -121,11 +147,15 @@ class BrowserBridge:
         data = result.get("data")
         if not isinstance(data, dict):
             raise BrowserBridgeError("浏览器扩展返回了无效的当前页数据。")
+        self._validate_target(data, target)
         return data
 
-    async def extract_tables(self, timeout: float = 8.0) -> dict[str, Any]:
+    async def extract_tables(
+        self, *, target: dict[str, Any] | None = None, timeout: float = 8.0
+    ) -> dict[str, Any]:
         result = await self.command(
             "extract_table",
+            target=target,
             payload={
                 "max_tables": 10,
                 "max_rows_per_table": 500,
@@ -140,11 +170,15 @@ class BrowserBridge:
         data = result.get("data")
         if not isinstance(data, dict):
             raise BrowserBridgeError("浏览器扩展返回了无效的表格数据。")
+        self._validate_target(data, target)
         return data
 
-    async def extract_structured_blocks(self, timeout: float = 8.0) -> dict[str, Any]:
+    async def extract_structured_blocks(
+        self, *, target: dict[str, Any] | None = None, timeout: float = 8.0
+    ) -> dict[str, Any]:
         result = await self.command(
             "extract_structured_blocks",
+            target=target,
             payload={
                 "max_blocks": 20,
                 "max_items_per_block": 200,
@@ -160,6 +194,7 @@ class BrowserBridge:
         data = result.get("data")
         if not isinstance(data, dict):
             raise BrowserBridgeError("浏览器扩展返回了无效的列表/卡片数据。")
+        self._validate_target(data, target)
         return data
 
 

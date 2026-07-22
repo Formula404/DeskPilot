@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, lazy, MouseEvent as ReactMouseEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Window } from "@tauri-apps/api/window";
 import {
   BookOpen,
@@ -18,8 +18,8 @@ import {
   X
 } from "lucide-react";
 import deskpilotWhiteIcon from "../assets/deskpilot-white.png";
-import { cancelTask, createTask, openEventStream } from "../api/client";
-import type { TaskEvent } from "../types/api";
+import { cancelTask, createContextSnapshot, createSession, createTask, openEventStream } from "../api/client";
+import type { TaskArtifact, TaskEvent } from "../types/api";
 import type { SuggestedAction, OverlayMode } from "../types/window";
 import { useTaskStore } from "../store/taskStore";
 import { gsap, useGSAP } from "../motion/register";
@@ -27,6 +27,7 @@ import { getMotionDuration, motion } from "../motion/constants";
 import { useReducedMotion } from "../motion/useReducedMotion";
 import { useWindowLifecycle } from "../hooks/useWindowLifecycle";
 import { CommandComposer } from "./CommandComposer";
+import { ArtifactLinks } from "./ArtifactLinks";
 import { TaskExecutionPanel } from "./TaskPanel";
 import { isVisibleTaskStep } from "./taskStatus";
 import {
@@ -35,6 +36,8 @@ import {
   setOverlayWindowShape,
   type OverlayShape
 } from "./windowActions";
+
+const MarkdownContent = lazy(() => import("./MarkdownContent"));
 
 const suggestedActions: SuggestedAction[] = [
   { id: "summarize", label: "总结网页", prompt: "总结当前网页并保存为 Markdown", icon: FileText },
@@ -60,6 +63,30 @@ function latestStepLabel(events: TaskEvent[]) {
   return visible[visible.length - 1]?.message ?? "正在准备任务";
 }
 
+function extractArtifacts(events: TaskEvent[]): TaskArtifact[] {
+  const artifacts: TaskArtifact[] = [];
+  const append = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    value.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const candidate = item as { type?: unknown; path?: unknown };
+      if (typeof candidate.type === "string" && typeof candidate.path === "string" && candidate.path.trim()) {
+        artifacts.push({ type: candidate.type, path: candidate.path });
+      }
+    });
+  };
+  events.forEach((event) => {
+    append(event.payload?.artifacts);
+    const step = event.payload?.step;
+    if (!step || typeof step !== "object" || !("output" in step)) return;
+    const output = (step as { output?: unknown }).output;
+    if (output && typeof output === "object" && "artifacts" in output) {
+      append((output as { artifacts?: unknown }).artifacts);
+    }
+  });
+  return artifacts;
+}
+
 export function OverlayView() {
   const rootRef = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -73,6 +100,7 @@ export function OverlayView() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [stepsExpanded, setStepsExpanded] = useState(true);
   const [composerSignal, setComposerSignal] = useState<"idle" | "submit" | "error">("idle");
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const reduceMotion = useReducedMotion();
   const { events, addEvent, clearEvents, currentTaskId, setCurrentTaskId } = useTaskStore();
   const currentTaskEvents = useMemo(
@@ -84,6 +112,7 @@ export function OverlayView() {
     [currentTaskEvents]
   );
   const finalResponse = useMemo(() => extractFinalResponse(currentTaskEvents), [currentTaskEvents]);
+  const artifacts = useMemo(() => extractArtifacts(currentTaskEvents), [currentTaskEvents]);
   const mode = useMemo<OverlayMode>(() => {
     if (isCreatingTask) return "creating";
     if (currentTaskEvents.some((event) => event.type === "task.failed")) return "failed";
@@ -260,7 +289,10 @@ export function OverlayView() {
     clearEvents();
     setCurrentTaskId(null);
     try {
-      const response = await createTask(trimmed);
+      const activeSessionId = sessionId ?? (await createSession()).session_id;
+      if (!sessionId) setSessionId(activeSessionId);
+      const snapshot = await createContextSnapshot(activeSessionId);
+      const response = await createTask(trimmed, activeSessionId, snapshot.context_snapshot_id);
       setCurrentTaskId(response.task_id);
       setMessage("");
     } catch (error) {
@@ -304,6 +336,7 @@ export function OverlayView() {
     setStreamError(null);
     clearEvents();
     setCurrentTaskId(null);
+    setSessionId(null);
     setShape("quick");
   }
 
@@ -411,12 +444,17 @@ export function OverlayView() {
                     <p>{statusLabel}</p>
                   </div>
                 </div>
-              ) : finalResponse ? (
+              ) : finalResponse || artifacts.length ? (
                 <div className="assistant-response">
                   <span className="assistant-avatar"><Sparkles size={16} /></span>
                   <div>
-                    <strong>DeskPilot</strong>
-                    <p>{finalResponse}</p>
+                    <strong className="assistant-response-author">DeskPilot</strong>
+                    {finalResponse ? (
+                      <Suspense fallback={<div className="assistant-markdown-loading">正在排版回答…</div>}>
+                        <MarkdownContent content={finalResponse} />
+                      </Suspense>
+                    ) : null}
+                    <ArtifactLinks artifacts={artifacts} onError={setActionError} />
                   </div>
                 </div>
               ) : null}

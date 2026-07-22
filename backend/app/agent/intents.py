@@ -17,6 +17,8 @@ def detect_intent(message: str) -> str:
         for keyword in ["加入知识库", "存入知识库", "归档当前页面", "归档当前网页", "收藏到知识库", "记住这篇", "导入文件到知识库", "导入知识库"]
     ):
         return "knowledge_ingest"
+    if normalized.strip().startswith(("记住", "请记住")):
+        return "memory_write"
     if any(keyword in normalized for keyword in table_keywords) and any(
         keyword in normalized for keyword in export_keywords
     ):

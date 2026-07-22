@@ -70,6 +70,49 @@ def init_db() -> None:
               updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS sessions (
+              id TEXT PRIMARY KEY,
+              title TEXT,
+              summary TEXT NOT NULL DEFAULT '',
+              summary_through_message_id TEXT,
+              status TEXT NOT NULL DEFAULT 'active',
+              source TEXT NOT NULL DEFAULT 'floating_window',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              archived_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+              id TEXT PRIMARY KEY,
+              session_id TEXT NOT NULL,
+              task_id TEXT,
+              role TEXT NOT NULL,
+              content TEXT NOT NULL,
+              content_json TEXT,
+              sensitivity TEXT NOT NULL DEFAULT 'normal',
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_messages_session_created
+            ON messages(session_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS context_snapshots (
+              id TEXT PRIMARY KEY,
+              session_id TEXT,
+              source TEXT NOT NULL,
+              window_json TEXT NOT NULL DEFAULT '{}',
+              browser_json TEXT NOT NULL DEFAULT '{}',
+              selection_json TEXT NOT NULL DEFAULT '{}',
+              attachments_json TEXT NOT NULL DEFAULT '[]',
+              sensitivity TEXT NOT NULL DEFAULT 'normal',
+              version INTEGER NOT NULL DEFAULT 1,
+              captured_at TEXT NOT NULL,
+              expires_at TEXT,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE SET NULL
+            );
+
             CREATE TABLE IF NOT EXISTS task_runs (
               id TEXT PRIMARY KEY,
               user_message TEXT NOT NULL,
@@ -147,8 +190,49 @@ def init_db() -> None:
               updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS context_usage (
+              id TEXT PRIMARY KEY,
+              task_id TEXT NOT NULL,
+              node_name TEXT NOT NULL,
+              block_id TEXT NOT NULL,
+              block_kind TEXT NOT NULL,
+              source_type TEXT,
+              source_id TEXT,
+              token_estimate INTEGER NOT NULL DEFAULT 0,
+              truncated INTEGER NOT NULL DEFAULT 0,
+              relevance_score REAL,
+              created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_context_usage_task
+            ON context_usage(task_id, node_name, created_at);
+
+            CREATE TABLE IF NOT EXISTS task_checkpoints (
+              id TEXT PRIMARY KEY,
+              task_id TEXT NOT NULL,
+              node_name TEXT NOT NULL,
+              state_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_task_checkpoints_task_created
+            ON task_checkpoints(task_id, created_at);
+
             CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts
             USING fts5(content, kind, content='memory_items', content_rowid='rowid');
+
+            CREATE TRIGGER IF NOT EXISTS memory_items_ai AFTER INSERT ON memory_items BEGIN
+              INSERT INTO memory_fts(rowid, content, kind) VALUES (new.rowid, new.content, new.kind);
+            END;
+            CREATE TRIGGER IF NOT EXISTS memory_items_ad AFTER DELETE ON memory_items BEGIN
+              INSERT INTO memory_fts(memory_fts, rowid, content, kind)
+              VALUES ('delete', old.rowid, old.content, old.kind);
+            END;
+            CREATE TRIGGER IF NOT EXISTS memory_items_au AFTER UPDATE ON memory_items BEGIN
+              INSERT INTO memory_fts(memory_fts, rowid, content, kind)
+              VALUES ('delete', old.rowid, old.content, old.kind);
+              INSERT INTO memory_fts(rowid, content, kind) VALUES (new.rowid, new.content, new.kind);
+            END;
 
             CREATE TABLE IF NOT EXISTS schema_migrations (
               version INTEGER PRIMARY KEY,
@@ -325,6 +409,40 @@ def init_db() -> None:
               tokenize = 'unicode61'
             );
             """
+        )
+        task_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(task_runs)").fetchall()
+        }
+        for name, definition in {
+            "session_id": "TEXT",
+            "turn_id": "TEXT",
+            "context_snapshot_id": "TEXT",
+            "parent_task_id": "TEXT",
+            "context_version": "INTEGER NOT NULL DEFAULT 1",
+        }.items():
+            if name not in task_columns:
+                connection.execute(f"ALTER TABLE task_runs ADD COLUMN {name} {definition}")
+        memory_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(memory_items)").fetchall()
+        }
+        for name, definition in {
+            "key": "TEXT",
+            "value_json": "TEXT",
+            "confidence": "REAL NOT NULL DEFAULT 1.0",
+            "source_type": "TEXT",
+            "expires_at": "TEXT",
+            "last_used_at": "TEXT",
+            "use_count": "INTEGER NOT NULL DEFAULT 0",
+            "status": "TEXT NOT NULL DEFAULT 'active'",
+        }.items():
+            if name not in memory_columns:
+                connection.execute(f"ALTER TABLE memory_items ADD COLUMN {name} {definition}")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_task_runs_session_created ON task_runs(session_id, created_at)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_context_snapshots_session_created "
+            "ON context_snapshots(session_id, created_at)"
         )
         watch_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(knowledge_web_watches)").fetchall()

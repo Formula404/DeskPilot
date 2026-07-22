@@ -6,24 +6,31 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 
 from backend.app.agent.nodes import (
+    build_context,
     export_current_page_table,
     finalize,
     general_chat,
     ingest_knowledge,
     maintain_knowledge,
     query_knowledge,
+    propose_or_write_memory,
+    prepare_memory_write,
     review_knowledge,
+    load_snapshot,
+    load_task,
     route_intent,
     summarize_current_page,
 )
 from backend.app.agent.state import AgentState
 from backend.app.api.events import EventBus
-from backend.app.db.repository import update_task
+from backend.app.db.repository import get_task, update_task
 
 logger = logging.getLogger(__name__)
 
 
 def _route_after_intent(state: AgentState) -> str:
+    if state.get("error"):
+        return "finalize"
     if state.get("intent") == "knowledge_ingest":
         return "ingest_knowledge"
     if state.get("intent") == "knowledge_query":
@@ -32,6 +39,8 @@ def _route_after_intent(state: AgentState) -> str:
         return "maintain_knowledge"
     if state.get("intent") == "knowledge_review":
         return "review_knowledge"
+    if state.get("intent") == "memory_write":
+        return "prepare_memory_write"
     if state.get("intent") == "web_page_summary":
         return "summarize_current_page"
     if state.get("intent") == "web_table_export":
@@ -41,7 +50,10 @@ def _route_after_intent(state: AgentState) -> str:
 
 def build_graph():
     graph = StateGraph(AgentState)
+    graph.add_node("load_task", load_task)
+    graph.add_node("load_snapshot", load_snapshot)
     graph.add_node("route_intent", route_intent)
+    graph.add_node("build_context", build_context)
     graph.add_node("summarize_current_page", summarize_current_page)
     graph.add_node("export_current_page_table", export_current_page_table)
     graph.add_node("general_chat", general_chat)
@@ -49,12 +61,18 @@ def build_graph():
     graph.add_node("query_knowledge", query_knowledge)
     graph.add_node("maintain_knowledge", maintain_knowledge)
     graph.add_node("review_knowledge", review_knowledge)
+    graph.add_node("prepare_memory_write", prepare_memory_write)
     graph.add_node("finalize", finalize)
-    graph.set_entry_point("route_intent")
+    graph.add_node("propose_or_write_memory", propose_or_write_memory)
+    graph.set_entry_point("load_task")
+    graph.add_edge("load_task", "load_snapshot")
+    graph.add_edge("load_snapshot", "route_intent")
+    graph.add_edge("route_intent", "build_context")
     graph.add_conditional_edges(
-        "route_intent",
+        "build_context",
         _route_after_intent,
         {
+            "finalize": "finalize",
             "summarize_current_page": "summarize_current_page",
             "export_current_page_table": "export_current_page_table",
             "general_chat": "general_chat",
@@ -62,6 +80,7 @@ def build_graph():
             "query_knowledge": "query_knowledge",
             "maintain_knowledge": "maintain_knowledge",
             "review_knowledge": "review_knowledge",
+            "prepare_memory_write": "prepare_memory_write",
         },
     )
     graph.add_edge("summarize_current_page", "finalize")
@@ -71,7 +90,9 @@ def build_graph():
     graph.add_edge("query_knowledge", "finalize")
     graph.add_edge("maintain_knowledge", "finalize")
     graph.add_edge("review_knowledge", "finalize")
-    graph.add_edge("finalize", END)
+    graph.add_edge("prepare_memory_write", "finalize")
+    graph.add_edge("finalize", "propose_or_write_memory")
+    graph.add_edge("propose_or_write_memory", END)
     return graph.compile()
 
 
@@ -85,7 +106,20 @@ async def run_agent(
         name = step.get("name") or "unknown"
         step_type = step.get("type") or "agent"
         status = step.get("status") or "completed"
-        if step_type == "tool":
+        event_type = (
+            "task.step.started"
+            if status in {"running", "started"}
+            else "task.step.failed"
+            if status == "failed"
+            else "task.step.completed"
+        )
+        if name == "load_snapshot":
+            message = "加载任务绑定的上下文快照"
+            event_type = "context.loading"
+        elif name == "build_context":
+            message = "上下文已按任务意图装配"
+            event_type = "context.ready"
+        elif step_type == "tool":
             message = f"调用工具 {name}"
         elif name == "intent_router":
             message = "识别任务意图"
@@ -93,7 +127,6 @@ async def run_agent(
             message = "生成任务结果"
         else:
             message = "执行步骤完成"
-        event_type = "task.step.failed" if status == "failed" else "task.step.completed"
         await event_bus.publish(event_type, message, task_id=task_id, payload={"step": step})
 
     await event_bus.publish("task.started", "任务开始执行", task_id=task_id)
@@ -104,6 +137,7 @@ async def run_agent(
                 "task_id": task_id,
                 "user_input": message,
                 "context_id": context_id,
+                "context_snapshot_id": context_id,
                 "observations": [],
                 "artifacts": [],
                 "publish_step": publish_step,
@@ -120,7 +154,10 @@ async def run_agent(
         await event_bus.publish("task.failed", str(exc), task_id=task_id)
         return {"error": str(exc)}
 
-    if result.get("error"):
+    current_task = get_task(task_id)
+    if result.get("cancelled") or (current_task and current_task.get("status") == "cancelled"):
+        await event_bus.publish("task.cancelled", "任务已取消", task_id=task_id)
+    elif result.get("error"):
         await event_bus.publish("task.failed", result["error"], task_id=task_id)
     else:
         await event_bus.publish(

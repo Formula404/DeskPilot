@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from backend.app.browser.bridge import BrowserBridgeError, browser_bridge
+from backend.app.context.runtime_binding import current_browser_target
 from backend.app.db.repository import now_iso, save_browser_context
 from backend.app.knowledge.backup import backup_database
 from backend.app.knowledge.compiler import KnowledgeCompileError, compile_source, review_proposal
@@ -29,7 +30,8 @@ async def _ingest_current_page(payload: dict) -> ToolResult:
     try:
         if not get_knowledge_settings().enabled:
             raise KnowledgeIngestError("知识库已在设置中停用。", "KNOWLEDGE_DISABLED")
-        page = await browser_bridge.collect_page()
+        target = current_browser_target()
+        page = await browser_bridge.collect_page(target=target) if target else await browser_bridge.collect_page()
         url = page.get("url")
         if not isinstance(url, str) or not url:
             raise KnowledgeIngestError("浏览器扩展未返回有效 URL。", "KNOWLEDGE_INVALID_URL")
