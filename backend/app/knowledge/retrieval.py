@@ -40,6 +40,7 @@ def search_knowledge(query: str, limit: int | None = None, *, relation_depth: in
             "details": sections.get("Details", ""),
             "status": frontmatter.status,
             "review_state": frontmatter.review_state,
+            "sensitivity": note.get("sensitivity", "normal"),
             "updated_at": frontmatter.updated_at,
             "created_at": frontmatter.created_at,
             "aliases": frontmatter.aliases,

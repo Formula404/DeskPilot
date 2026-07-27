@@ -13,6 +13,14 @@ class AgentState(TypedDict, total=False):
     context_snapshot_id: str | None
     context: dict[str, Any]
     intent: str
+    manager_context: dict[str, Any]
+    manager_plan: dict[str, Any]
+    manager_metadata: dict[str, Any]
+    manager_turn_count: int
+    intent_understanding: dict[str, Any]
+    delegations: list[dict[str, Any]]
+    active_delegation_id: str | None
+    unresolved_goals: list[str]
     plan: list[str]
     observations: list[dict[str, Any]]
     step_count: int

@@ -8,6 +8,7 @@ import pytest
 
 from backend.app.browser.bridge import BrowserBridge, BrowserBridgeError
 from backend.app.context.budget import ContextBudgeter
+from backend.app.context import service as context_service
 from backend.app.context.service import ContextBuilder, browser_target
 from backend.app.agent.intents import detect_intent
 from backend.app.agent import nodes
@@ -77,6 +78,45 @@ def test_task_persists_session_turn_and_snapshot_binding(context_data_dir) -> No
 
 
 @pytest.mark.asyncio
+async def test_collect_metadata_falls_back_for_legacy_extension(monkeypatch) -> None:
+    bridge = BrowserBridge()
+    commands = []
+
+    async def fake_command(command: str, **kwargs) -> dict:
+        commands.append((command, kwargs))
+        if command == "collect_metadata":
+            return {
+                "ok": False,
+                "error": {
+                    "code": "UNSUPPORTED_COMMAND",
+                    "message": "不支持的浏览器命令：collect_metadata",
+                },
+            }
+        return {
+            "ok": True,
+            "data": {
+                "tab_id": 17,
+                "url": "https://example.com/legacy",
+                "title": "Legacy page",
+                "visible_text": "not persisted by the snapshot service",
+            },
+        }
+
+    monkeypatch.setattr(bridge, "command", fake_command)
+
+    metadata = await bridge.collect_metadata()
+
+    assert [item[0] for item in commands] == ["collect_metadata", "collect_page"]
+    assert commands[1][1]["payload"]["include_visible_text"] is False
+    assert metadata["tab_id"] == 17
+    assert metadata["url"] == "https://example.com/legacy"
+    assert metadata["document_id"] == "17:https://example.com/legacy"
+    assert len(metadata["content_hash"]) == 64
+    assert "legacy_collect_page_fallback" in metadata["_degraded_reasons"]
+    assert "content_hash_derived_from_legacy_page" in metadata["_degraded_reasons"]
+
+
+@pytest.mark.asyncio
 async def test_context_builder_keeps_concurrent_task_targets_isolated(context_data_dir) -> None:
     session_id = create_session()
     snapshot_a = _snapshot(session_id, tab_id="1", url="https://example.com/a")
@@ -92,6 +132,82 @@ async def test_context_builder_keeps_concurrent_task_targets_isolated(context_da
     assert browser_target(bundle_b["snapshot"])["tab"] == 2
     assert bundle_a["snapshot"]["browser"]["url"] == "https://example.com/a"
     assert bundle_b["snapshot"]["browser"]["url"] == "https://example.com/b"
+
+
+@pytest.mark.asyncio
+async def test_manager_snapshot_metadata_is_required_under_tight_budget(context_data_dir) -> None:
+    session_id = create_session()
+    snapshot_id = _snapshot(session_id, tab_id="21", url="https://example.com/required")
+    task_id = create_task(
+        "当前这个页面是什么？",
+        session_id=session_id,
+        context_snapshot_id=snapshot_id,
+    )
+    bundle = await ContextBuilder().build(task_id=task_id, agent="manager", token_budget=1)
+    kinds = {item["kind"] for item in bundle["blocks"]}
+    assert {"user_message", "foreground_window", "browser_page_metadata"} <= kinds
+    assert all(
+        item.get("required")
+        for item in bundle["blocks"]
+        if item["kind"] in {"user_message", "foreground_window", "browser_page_metadata"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_knowledge_agent_gets_own_rag_context_but_manager_does_not(
+    context_data_dir, monkeypatch
+) -> None:
+    task_id = create_task("从知识库查一下 X")
+    monkeypatch.setattr(
+        context_service,
+        "get_knowledge_settings",
+        lambda: SimpleNamespace(enabled=True, allow_private_remote=False),
+    )
+    monkeypatch.setattr(
+        context_service,
+        "search_knowledge",
+        lambda query, limit: [
+            {
+                "id": "note-x",
+                "title": "X",
+                "summary": "X 的可靠摘要",
+                "overview": "",
+                "path": "notes/x.md",
+                "status": "active",
+                "updated_at": datetime.now(UTC).isoformat(),
+                "sources": [
+                    {
+                        "source_id": "source-x",
+                        "snapshot_id": "snapshot-x",
+                        "source_title": "X source",
+                        "canonical_uri": "https://example.com/x",
+                        "sensitivity": "normal",
+                    }
+                ],
+            },
+            {
+                "id": "note-private",
+                "title": "Private",
+                "summary": "不应发送给远程模型",
+                "overview": "",
+                "path": "notes/private.md",
+                "status": "active",
+                "sensitivity": "private",
+                "updated_at": datetime.now(UTC).isoformat(),
+                "sources": [],
+            },
+        ],
+    )
+
+    manager_bundle = await ContextBuilder().build(task_id=task_id, agent="manager")
+    knowledge_bundle = await ContextBuilder().build(task_id=task_id, agent="knowledge")
+
+    assert manager_bundle["knowledge"] == []
+    assert not any(item["kind"] == "knowledge_evidence" for item in manager_bundle["blocks"])
+    assert knowledge_bundle["execution"]["context_policy_key"] == "agent:knowledge"
+    assert len(knowledge_bundle["knowledge"]) == 1
+    assert knowledge_bundle["knowledge"][0]["content"]["note_id"] == "note-x"
+    assert knowledge_bundle["knowledge"][0]["trust"] == "untrusted"
 
 
 @pytest.mark.asyncio

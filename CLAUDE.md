@@ -35,7 +35,7 @@ FastAPI 本地服务 (127.0.0.1:8765)
        ▼
 LangGraph 编排核心
        │
-       ├── Tool Calling Agent（LLM 决策 / 工具调用 / observation）
+       ├── Manager + 专业 Agents as Tools（语义理解 / 委派 / observation）
        ├── 上下文感知层（窗口识别 / 截图 OCR / 浏览器上下文）
        ├── 工具注册表（CLI / API / 浏览器扩展 / Playwright / RPA）
        ├── 执行安全层（权限 / 审批 / 审计日志）
@@ -49,7 +49,7 @@ DeskPilot/
   backend/                  # Python FastAPI 本地服务
     app/
       api/                  # HTTP/SSE/WebSocket 路由
-      agent/                # LangGraph 图、节点、状态、意图路由
+      agent/                # Manager LangGraph、专业 Agent、委派、Provider 兼容
       context/              # 窗口/浏览器/截图上下文采集
       core/                 # 配置、日志、路径
       db/                   # SQLite 连接、迁移、模型

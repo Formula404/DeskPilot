@@ -91,6 +91,7 @@ export function OverlayView() {
   const rootRef = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const openTimelineRef = useRef<gsap.core.Timeline | null>(null);
+  const closeTweenRef = useRef<gsap.core.Tween | null>(null);
   const streamErrorTimerRef = useRef<number | null>(null);
   const [shape, setShape] = useState<OverlayShape>("quick");
   const [message, setMessage] = useState("");
@@ -128,6 +129,8 @@ export function OverlayView() {
     if (!panel || openTimelineRef.current?.isActive()) return;
     const children = panel.querySelectorAll("[data-motion='panel-item']");
     gsap.killTweensOf([panel, ...Array.from(children)]);
+    closeTweenRef.current?.kill();
+    closeTweenRef.current = null;
     openTimelineRef.current?.kill();
     openTimelineRef.current = gsap.timeline({
       defaults: { ease: motion.ease.out },
@@ -146,11 +149,15 @@ export function OverlayView() {
         scale: 1,
         duration: getMotionDuration(0.22, reduceMotion)
       })
-      .from(children, {
+      .fromTo(children, {
         autoAlpha: 0,
-        y: 5,
+        y: 5
+      }, {
+        autoAlpha: 1,
+        y: 0,
         duration: getMotionDuration(0.16, reduceMotion),
-        stagger: reduceMotion ? 0 : 0.025
+        stagger: reduceMotion ? 0 : 0.025,
+        clearProps: "transform,opacity,visibility"
       }, "<0.05");
   }, [reduceMotion]);
 
@@ -162,10 +169,16 @@ export function OverlayView() {
         scale: 0.965,
         transformOrigin: "50% 100%"
       });
-      return () => openTimelineRef.current?.kill();
+      return () => {
+        openTimelineRef.current?.kill();
+        closeTweenRef.current?.kill();
+      };
     }
     playOpenMotion();
-    return () => openTimelineRef.current?.kill();
+    return () => {
+      openTimelineRef.current?.kill();
+      closeTweenRef.current?.kill();
+    };
   }, { dependencies: [playOpenMotion], scope: rootRef });
 
   useEffect(() => {
@@ -217,13 +230,21 @@ export function OverlayView() {
   const runCloseMotion = useCallback(() => new Promise<void>((resolve) => {
     openTimelineRef.current?.kill();
     openTimelineRef.current = null;
-    gsap.to(panelRef.current, {
+    closeTweenRef.current?.kill();
+    closeTweenRef.current = gsap.to(panelRef.current, {
       autoAlpha: 0,
       y: 8,
       scale: 0.97,
       duration: getMotionDuration(0.14, reduceMotion),
       ease: "power2.in",
+      onInterrupt: () => {
+        closeTweenRef.current = null;
+        resolve();
+      },
       onComplete: () => {
+        closeTweenRef.current = null;
+        const children = panelRef.current?.querySelectorAll("[data-motion='panel-item']") ?? [];
+        gsap.set(children, { clearProps: "transform,opacity,visibility" });
         setShape("quick");
         void hideCurrentWindow().finally(resolve);
       }

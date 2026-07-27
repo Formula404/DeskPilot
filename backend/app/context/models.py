@@ -44,3 +44,30 @@ INTENT_CONTEXT_POLICY: dict[str, set[str]] = {
     "memory_write": {"conversation", "preferences"},
     "desktop_app_open": {"snapshot", "conversation", "preferences", "memories"},
 }
+
+
+AGENT_CONTEXT_POLICY: dict[str, set[str]] = {
+    "manager": {"snapshot", "browser", "conversation", "preferences", "memories", "artifacts"},
+    "web": {"snapshot", "selection", "browser", "conversation", "preferences", "artifacts"},
+    "knowledge": {"snapshot", "browser", "conversation", "preferences", "memories", "knowledge", "artifacts"},
+    "file": {"conversation", "preferences", "artifacts"},
+    "desktop": {"snapshot", "conversation", "preferences", "artifacts"},
+    "conversation": {"conversation", "preferences", "memories", "artifacts"},
+}
+
+
+CAPABILITY_CONTEXT_REQUIREMENTS: dict[str, set[str]] = {
+    "browser.collect_current_page": {"snapshot", "browser"},
+    "browser.get_current_page": {"snapshot", "browser"},
+    "browser.summarize_current_page": {"snapshot", "browser"},
+    "browser.export_table_to_xlsx": {"snapshot", "browser"},
+    "browser.export_structured_blocks_to_xlsx": {"snapshot", "browser"},
+    "knowledge.ingest_current_page": {"snapshot", "browser"},
+    "knowledge.ingest_file": {"conversation"},
+    "knowledge.ingest_text": {"conversation"},
+    "knowledge.search": {"conversation", "knowledge"},
+    "knowledge.answer": {"conversation", "knowledge"},
+    "file.read_text": {"artifacts"},
+    "file.write_markdown": {"artifacts"},
+    "file.write_xlsx": {"artifacts"},
+}

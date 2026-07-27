@@ -6,6 +6,7 @@ import type { ApplicationSettings, ApplicationSettingsUpdate } from "../types/ap
 
 type Section = "ai" | "general";
 type Feedback = { tone: "success" | "error"; message: string } | null;
+type SpecialistKey = keyof ApplicationSettings["specialists"];
 
 export function ApplicationSettingsPanel({ section }: { section: Section }) {
   const [settings, setSettings] = useState<ApplicationSettings | null>(null);
@@ -31,13 +32,26 @@ export function ApplicationSettingsPanel({ section }: { section: Section }) {
     setSettings((current) => current ? { ...current, general: { ...current.general, [key]: value } } : current);
   }
 
+  function changeManager<Key extends keyof ApplicationSettings["manager"]>(key: Key, value: ApplicationSettings["manager"][Key]) {
+    setSettings((current) => current ? { ...current, manager: { ...current.manager, [key]: value } } : current);
+  }
+
+  function changeSpecialist<Key extends keyof ApplicationSettings["specialists"][SpecialistKey]>(agent: SpecialistKey, key: Key, value: ApplicationSettings["specialists"][SpecialistKey][Key]) {
+    setSettings((current) => current ? {
+      ...current,
+      specialists: { ...current.specialists, [agent]: { ...current.specialists[agent], [key]: value } }
+    } : current);
+  }
+
   function payload(): ApplicationSettingsUpdate | null {
     if (!settings) return null;
     const { api_key_configured: _configured, api_key_hint: _hint, ...ai } = settings.ai;
     return {
       schema_version: settings.schema_version,
       ai: { ...ai, api_key: keyTouched ? apiKey : null },
-      general: settings.general
+      general: settings.general,
+      manager: settings.manager,
+      specialists: settings.specialists
     };
   }
 
@@ -114,6 +128,34 @@ export function ApplicationSettingsPanel({ section }: { section: Section }) {
               <input type="range" min={0} max={2} step={0.1} value={settings.ai.temperature} onChange={(event) => changeAI("temperature", Number(event.target.value))} />
               <small>数值越低结果越稳定，越高则更有发散性。</small>
             </label>
+            <label className="settings-field" data-motion="settings-page-item">
+              <span>Manager 编排</span>
+              <select value={settings.manager.enabled ? "enabled" : "disabled"} onChange={(event) => changeManager("enabled", event.target.value === "enabled")}>
+                <option value="enabled">启用</option><option value="disabled">仅安全降级</option>
+              </select>
+              <small>关闭后只执行少量明确、低风险的规则降级任务。</small>
+            </label>
+            <label className="settings-field" data-motion="settings-page-item">
+              <span>结构化输出</span>
+              <select value={settings.manager.structured_output_mode} onChange={(event) => changeManager("structured_output_mode", event.target.value as ApplicationSettings["manager"]["structured_output_mode"])}>
+                <option value="auto">自动协商</option><option value="native">原生 JSON Schema</option><option value="json">JSON 兼容模式</option>
+              </select>
+            </label>
+            <label className="settings-field" data-motion="settings-page-item">
+              <span>Manager 模型</span>
+              <input value={settings.manager.model ?? ""} onChange={(event) => changeManager("model", event.target.value || null)} placeholder="留空继承主模型" />
+            </label>
+            <label className="settings-field" data-motion="settings-page-item">
+              <span>最大委派数</span>
+              <input type="number" min={1} max={32} value={settings.manager.max_delegations} onChange={(event) => changeManager("max_delegations", Number(event.target.value))} />
+            </label>
+            {(["web", "knowledge", "file", "desktop"] as SpecialistKey[]).map((agent) => (
+              <label className="settings-field" data-motion="settings-page-item" key={agent}>
+                <span>{agent[0].toUpperCase() + agent.slice(1)} Agent 模型</span>
+                <input value={settings.specialists[agent].model ?? ""} onChange={(event) => changeSpecialist(agent, "model", event.target.value || null)} placeholder="留空继承主模型" />
+                <small>最多 {settings.specialists[agent].max_tool_steps} 个工具步骤，超时 {settings.specialists[agent].timeout_seconds} 秒。</small>
+              </label>
+            ))}
           </div>
         </>
       ) : (

@@ -7,7 +7,13 @@ from typing import Any
 from backend.app.browser.bridge import BrowserBridgeError, browser_bridge
 from backend.app.context.budget import ContextBudgeter, estimate_tokens
 from backend.app.context.current_window import get_foreground_window
-from backend.app.context.models import ContextBlock, ContextBundle, INTENT_CONTEXT_POLICY
+from backend.app.context.models import (
+    AGENT_CONTEXT_POLICY,
+    CAPABILITY_CONTEXT_REQUIREMENTS,
+    ContextBlock,
+    ContextBundle,
+    INTENT_CONTEXT_POLICY,
+)
 from backend.app.context.security import contains_secret, redact_secrets
 from backend.app.db.repository import (
     get_browser_context,
@@ -24,7 +30,10 @@ from backend.app.db.repository import (
     save_context_snapshot,
     update_session,
 )
+from backend.app.knowledge.retrieval import search_knowledge
+from backend.app.knowledge.settings import get_knowledge_settings
 from backend.app.memory.search import retrieve_memory_refs
+from backend.app.memory.repository import list_memories
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -82,6 +91,10 @@ class RuntimeContextService:
         if "browser_metadata" in include or "selection" in include:
             try:
                 metadata = await browser_bridge.collect_metadata()
+                degraded.extend(
+                    f"browser_metadata:{reason}"
+                    for reason in metadata.get("_degraded_reasons") or []
+                )
                 browser = {
                     key: metadata.get(key)
                     for key in ("client_id", "tab_id", "url", "title", "document_id", "content_hash")
@@ -213,11 +226,37 @@ class ContextBuilder:
         self.budgeter = ContextBudgeter()
         self.conversation = ConversationContextService()
 
-    async def build(self, *, task_id: str, intent: str, token_budget: int = 9000) -> ContextBundle:
+    async def build(
+        self,
+        *,
+        task_id: str,
+        intent: str | None = None,
+        agent: str | None = None,
+        capabilities: list[str] | None = None,
+        token_budget: int = 9000,
+    ) -> ContextBundle:
         task = get_task(task_id)
         if not task:
             raise ValueError("任务不存在。")
-        policy = INTENT_CONTEXT_POLICY.get(intent, INTENT_CONTEXT_POLICY["general_chat"])
+        if agent:
+            policy = set(AGENT_CONTEXT_POLICY.get(agent, AGENT_CONTEXT_POLICY["conversation"]))
+            capability_policy: set[str] = set()
+            for capability in capabilities or []:
+                requirements = CAPABILITY_CONTEXT_REQUIREMENTS.get(capability, set())
+                policy.update(requirements)
+                capability_policy.update(requirements)
+            policy_key = f"agent:{agent}"
+        else:
+            legacy_intent = intent or "general_chat"
+            policy = set(INTENT_CONTEXT_POLICY.get(legacy_intent, INTENT_CONTEXT_POLICY["general_chat"]))
+            capability_policy = set()
+            policy_key = f"legacy_intent:{legacy_intent}"
+        snapshot_required = agent in {"manager", "web", "desktop"} or bool(
+            intent and intent.startswith("web_")
+        )
+        browser_required = agent in {"manager", "web"} or "browser" in capability_policy or bool(
+            intent and intent.startswith("web_")
+        )
         snapshot = get_context_snapshot(task.get("context_snapshot_id")) if task.get("context_snapshot_id") else None
         degraded: list[str] = []
         if snapshot and snapshot_expired(snapshot):
@@ -243,7 +282,7 @@ class ContextBuilder:
                     trust="user_provided",
                     sensitivity=snapshot["sensitivity"],
                     expires_at=snapshot.get("expires_at"),
-                    required=intent.startswith("web_"),
+                    required=snapshot_required,
                 )
             )
         if "browser" in policy and snapshot and snapshot.get("browser"):
@@ -256,7 +295,7 @@ class ContextBuilder:
                     captured_at=snapshot["captured_at"],
                     sensitivity=snapshot["sensitivity"],
                     expires_at=snapshot.get("expires_at"),
-                    required=intent.startswith("web_"),
+                    required=browser_required,
                 )
             )
         if "selection" in policy and snapshot and snapshot.get("selection"):
@@ -270,6 +309,7 @@ class ContextBuilder:
                     trust="user_provided",
                     sensitivity=snapshot["sensitivity"],
                     relevance_score=1.0,
+                    required=agent == "web",
                 )
             )
         conversation: dict[str, Any] = {}
@@ -309,6 +349,13 @@ class ContextBuilder:
         if "memories" in policy:
             try:
                 memories = retrieve_memory_refs(task["user_message"])
+                if agent == "manager":
+                    seen_memory_ids = {item.get("id") for item in memories}
+                    memories.extend(
+                        item
+                        for item in list_memories(10)
+                        if item.get("id") not in seen_memory_ids and item.get("status") == "active"
+                    )
             except Exception:
                 memories = []
                 degraded.append("memory_retrieval_failed")
@@ -329,6 +376,67 @@ class ContextBuilder:
                     )
                 )
             blocks.extend(memory_blocks)
+        knowledge_blocks: list[ContextBlock] = []
+        if "knowledge" in policy:
+            try:
+                knowledge_settings = get_knowledge_settings()
+                knowledge_results = (
+                    search_knowledge(task["user_message"], 5)
+                    if knowledge_settings.enabled
+                    else []
+                )
+                for result in knowledge_results:
+                    sources = [
+                        {
+                            "source_id": source.get("source_id"),
+                            "snapshot_id": source.get("snapshot_id"),
+                            "source_title": source.get("source_title"),
+                            "canonical_uri": source.get("canonical_uri"),
+                        }
+                        for source in result.get("sources") or []
+                    ]
+                    sensitivities = {
+                        str(source.get("sensitivity") or "normal")
+                        for source in result.get("sources") or []
+                    }
+                    sensitivities.add(str(result.get("sensitivity") or "normal"))
+                    sensitivity = (
+                        "secret"
+                        if "secret" in sensitivities
+                        else "private"
+                        if "private" in sensitivities
+                        else "normal"
+                    )
+                    if sensitivity == "secret" or (
+                        sensitivity == "private" and not knowledge_settings.allow_private_remote
+                    ):
+                        continue
+                    evidence = {
+                        "note_id": result.get("id"),
+                        "title": result.get("title"),
+                        "summary": result.get("summary"),
+                        "overview": result.get("overview"),
+                        "path": result.get("path"),
+                        "status": result.get("status"),
+                        "sources": sources,
+                    }
+                    if contains_secret(evidence):
+                        continue
+                    knowledge_blocks.append(
+                        _block(
+                            "knowledge_evidence",
+                            evidence,
+                            source_type="knowledge_note",
+                            source_id=str(result.get("id") or ""),
+                            captured_at=result.get("updated_at"),
+                            trust="untrusted",
+                            sensitivity=sensitivity,
+                            relevance_score=0.85,
+                        )
+                    )
+            except Exception:
+                degraded.append("knowledge_retrieval_failed")
+            blocks.extend(knowledge_blocks)
         artifacts: list[dict[str, Any]] = []
         if "artifacts" in policy and task.get("session_id"):
             artifacts = list_recent_artifacts(task["session_id"], 3)
@@ -390,10 +498,12 @@ class ContextBuilder:
             "conversation": conversation,
             "preferences": preference_blocks,
             "memories": memory_blocks,
-            "knowledge": [],
+            "knowledge": [item for item in selected if item.get("kind") == "knowledge_evidence"],
             "execution": {
                 "recent_artifacts": artifacts,
                 "resolved_references": resolved_references,
+                "context_policy": sorted(policy),
+                "context_policy_key": policy_key,
                 "intent_policy": sorted(policy),
             },
             "provenance": [

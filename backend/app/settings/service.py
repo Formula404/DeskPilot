@@ -34,6 +34,8 @@ def get_runtime_settings() -> RuntimeApplicationSettings:
         schema_version=settings.schema_version,
         ai=RuntimeAISettings(**settings.ai.model_dump(), api_key=key),
         general=settings.general,
+        manager=settings.manager,
+        specialists=settings.specialists,
     )
 
 
@@ -56,6 +58,8 @@ def get_public_settings() -> PublicApplicationSettings:
             api_key_hint=_key_hint(runtime.ai.api_key),
         ),
         general=runtime.general,
+        manager=runtime.manager,
+        specialists=runtime.specialists,
     )
 
 
@@ -64,6 +68,8 @@ def save_application_settings(update: ApplicationSettingsUpdate) -> PublicApplic
         schema_version=update.schema_version,
         ai=update.ai.model_dump(exclude={"api_key"}),
         general=update.general,
+        manager=update.manager,
+        specialists=update.specialists,
     )
     set_setting(SETTINGS_KEY, non_secret.model_dump_json())
     if update.ai.api_key is not None:

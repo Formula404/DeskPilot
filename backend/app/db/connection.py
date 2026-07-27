@@ -419,6 +419,13 @@ def init_db() -> None:
             "context_snapshot_id": "TEXT",
             "parent_task_id": "TEXT",
             "context_version": "INTEGER NOT NULL DEFAULT 1",
+            "manager_model": "TEXT",
+            "manager_prompt_version": "TEXT",
+            "intent_schema_version": "INTEGER",
+            "intent_understanding_json": "TEXT",
+            "manager_latency_ms": "INTEGER",
+            "manager_fallback_reason": "TEXT",
+            "delegation_count": "INTEGER NOT NULL DEFAULT 0",
         }.items():
             if name not in task_columns:
                 connection.execute(f"ALTER TABLE task_runs ADD COLUMN {name} {definition}")

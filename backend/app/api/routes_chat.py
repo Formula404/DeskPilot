@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,6 +15,7 @@ from backend.app.db.repository import (
     get_context_snapshot,
     get_session,
     get_task,
+    list_task_steps,
     update_task,
 )
 from backend.app.schemas.tasks import ChatRequest, ChatResponse, TaskResponse
@@ -74,6 +76,28 @@ def task_detail(task_id: str) -> TaskResponse:
         result=task.get("result_summary"),
         error=error,
     )
+
+
+@router.get("/tasks/{task_id}/trace")
+def task_trace(task_id: str) -> dict:
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    understanding = json.loads(task.get("intent_understanding_json") or "null")
+    return {
+        "task_id": task_id,
+        "status": task["status"],
+        "manager": {
+            "model": task.get("manager_model"),
+            "prompt_version": task.get("manager_prompt_version"),
+            "schema_version": task.get("intent_schema_version"),
+            "latency_ms": task.get("manager_latency_ms"),
+            "fallback_reason": task.get("manager_fallback_reason"),
+            "delegation_count": task.get("delegation_count") or 0,
+        },
+        "intent_understanding": understanding,
+        "steps": list_task_steps(task_id),
+    }
 
 
 @router.post("/tasks/{task_id}/cancel")

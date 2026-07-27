@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from backend.app.context.security import redact_secrets
+from backend.app.core.security import redact_secrets
 from backend.app.db.connection import connect
 
 
@@ -80,6 +80,40 @@ def update_task(
         )
 
 
+def update_task_manager_trace(
+    task_id: str,
+    *,
+    manager_model: str,
+    manager_prompt_version: str,
+    intent_schema_version: int,
+    intent_understanding: dict[str, Any],
+    manager_latency_ms: int,
+    manager_fallback_reason: str | None,
+    delegation_count: int,
+) -> None:
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE task_runs
+            SET manager_model = ?, manager_prompt_version = ?, intent_schema_version = ?,
+                intent_understanding_json = ?, manager_latency_ms = ?,
+                manager_fallback_reason = ?, delegation_count = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                manager_model,
+                manager_prompt_version,
+                intent_schema_version,
+                json.dumps(redact_secrets(intent_understanding), ensure_ascii=False),
+                manager_latency_ms,
+                manager_fallback_reason,
+                delegation_count,
+                now_iso(),
+                task_id,
+            ),
+        )
+
+
 def get_task(task_id: str) -> dict[str, Any] | None:
     with connect() as connection:
         row = connection.execute(
@@ -122,6 +156,21 @@ def add_task_step(
             ),
         )
     return step_id
+
+
+def list_task_steps(task_id: str) -> list[dict[str, Any]]:
+    with connect() as connection:
+        rows = connection.execute(
+            "SELECT * FROM task_steps WHERE task_id = ? ORDER BY step_index, created_at",
+            (task_id,),
+        ).fetchall()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["input"] = json.loads(item.pop("input_json") or "null")
+        item["output"] = json.loads(item.pop("output_json") or "null")
+        result.append(item)
+    return result
 
 
 def save_browser_context(
@@ -476,6 +525,11 @@ def save_task_checkpoint(task_id: str, node_name: str, state: dict[str, Any]) ->
             "turn_id",
             "context_snapshot_id",
             "intent",
+            "manager_context",
+            "intent_understanding",
+            "delegations",
+            "active_delegation_id",
+            "unresolved_goals",
             "plan",
             "step_count",
             "artifacts",

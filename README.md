@@ -16,7 +16,7 @@ FastAPI 本地服务 (127.0.0.1:8765)
        │
        ▼
 LangGraph 编排核心
-       ├── Tool Calling Agent（LLM 决策 / 工具调用 / observation）
+       ├── Manager + 专业 Agents as Tools（语义理解 / 委派 / observation）
        ├── 上下文感知（窗口识别 / 浏览器 / 截图 OCR）
        ├── 工具注册表（浏览器 / Playwright / UIA / RPA / 文件）
        ├── 安全层（权限 / 审批 / 审计）
@@ -125,7 +125,7 @@ npm run tauri -- dev
 
 | 阶段 | 内容                                                      | 状态   |
 | ---- | --------------------------------------------------------- | ------ |
-| 0    | 项目骨架 — 前后端工程、Tool Calling Agent、Tool Registry | 进行中 |
+| 0    | 项目骨架 — 前后端工程、Manager/专业 Agent、Tool Registry | 进行中 |
 | 1    | 悬浮窗 + 当前窗口识别                                     | 待开始 |
 | 2    | 网页操作闭环（总结、表格导出）                            | 待开始 |
 | 3    | 桌面应用 + 基础 RPA（网易云音乐）                         | 待开始 |

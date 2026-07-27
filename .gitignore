@@ -46,6 +46,8 @@ frontend/test-results/
 frontend/playwright-report/
 report/*
 !report/上下文工程设计.md
+!report/大模型语义意图识别完整设计.md
+!report/大模型语义意图识别模块开发交付说明.md
 
 # Python type checking
 .mypy_cache/

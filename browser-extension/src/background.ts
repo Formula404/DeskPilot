@@ -152,12 +152,27 @@ async function collectMetadata(command: BrowserCommand) {
     throw new Error("当前标签页不是可读取的普通网页，请切换到 http/https 页面后重试。");
   }
   let selectionText = "";
+  let contentHash = "";
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => window.getSelection()?.toString().slice(0, 8000) ?? "",
+      func: async () => {
+        const text = document.body?.innerText?.slice(0, 100000) ?? "";
+        let hash = "";
+        try {
+          const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+          hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+        } catch {
+          // The backend records an explicit degraded reason when a hash is unavailable.
+        }
+        return {
+          selection_text: window.getSelection()?.toString().slice(0, 8000) ?? "",
+          content_hash: hash,
+        };
+      },
     });
-    selectionText = String(results[0]?.result ?? "");
+    selectionText = String(results[0]?.result?.selection_text ?? "");
+    contentHash = String(results[0]?.result?.content_hash ?? "");
   } catch {
     // Restricted pages can still provide stable tab metadata.
   }
@@ -166,6 +181,7 @@ async function collectMetadata(command: BrowserCommand) {
     url: tab.url,
     title: tab.title ?? "",
     document_id: `${tab.id}:${tab.url}`,
+    content_hash: contentHash || undefined,
     selection_text: selectionText,
     captured_at: new Date().toISOString(),
   };

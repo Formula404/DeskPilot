@@ -1,0 +1,29 @@
+[
+  {
+    "id": "manager-web-001",
+    "message": "帮我消化一下眼前这篇文章",
+    "expected": {
+      "domains": ["web"],
+      "operations": ["read", "transform"],
+      "needs_clarification": false
+    }
+  },
+  {
+    "id": "manager-cross-domain-001",
+    "message": "总结当前网页，存进知识库，再导出 Markdown",
+    "expected": {
+      "domains": ["web", "knowledge", "file"],
+      "operations": ["read", "transform", "save", "create"],
+      "needs_clarification": false
+    }
+  },
+  {
+    "id": "manager-clarify-001",
+    "message": "导出一下",
+    "expected": {
+      "domains": ["conversation"],
+      "operations": ["inspect"],
+      "needs_clarification": true
+    }
+  }
+]

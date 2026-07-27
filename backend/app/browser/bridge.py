@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -116,13 +117,56 @@ class BrowserBridge:
             self._pending.pop(request_id, None)
 
     async def collect_metadata(self, timeout: float = 2.0) -> dict[str, Any]:
+        legacy_fallback = False
         result = await self.command("collect_metadata", timeout=timeout)
         if not result.get("ok"):
             error = result.get("error") or {}
-            raise BrowserBridgeError(error.get("message") or "浏览器扩展采集页面元数据失败。")
+            message = error.get("message") or "浏览器扩展采集页面元数据失败。"
+            # Extensions loaded before the context-snapshot protocol was added do
+            # not know collect_metadata, but their collect_page response already
+            # contains the stable tab metadata needed to bind a task target. Keep
+            # the backend compatible while the unpacked extension is being
+            # reloaded by the browser.
+            if error.get("code") == "UNSUPPORTED_COMMAND" or (
+                "不支持" in message and "collect_metadata" in message
+            ):
+                legacy_fallback = True
+                result = await self.command(
+                    "collect_page",
+                    payload={
+                        "include_visible_text": False,
+                        "include_dom_summary": False,
+                        "max_text_chars": 0,
+                    },
+                    timeout=max(timeout, 8.0),
+                )
+                if not result.get("ok"):
+                    fallback_error = result.get("error") or {}
+                    raise BrowserBridgeError(
+                        fallback_error.get("message") or "浏览器扩展采集页面元数据失败。"
+                    )
+            else:
+                raise BrowserBridgeError(message)
         data = result.get("data")
         if not isinstance(data, dict):
             raise BrowserBridgeError("浏览器扩展返回了无效的页面元数据。")
+        degraded_reasons: list[str] = []
+        tab_id = data.get("tab_id")
+        url = data.get("url")
+        if not data.get("document_id") and tab_id is not None and url:
+            data["document_id"] = f"{tab_id}:{url}"
+            degraded_reasons.append("document_id_derived_by_backend")
+        if not data.get("content_hash"):
+            text = str(data.get("content_text") or data.get("visible_text") or "")
+            if text:
+                data["content_hash"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                degraded_reasons.append("content_hash_derived_from_legacy_page")
+            else:
+                degraded_reasons.append("content_hash_unavailable")
+        if legacy_fallback:
+            degraded_reasons.append("legacy_collect_page_fallback")
+        if degraded_reasons:
+            data["_degraded_reasons"] = list(dict.fromkeys(degraded_reasons))
         if self.client_info:
             data.setdefault("client_id", self.client_info.get("client_id"))
         return data

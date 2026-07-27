@@ -5,22 +5,13 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from backend.app.agent.nodes import (
-    build_context,
-    export_current_page_table,
-    finalize,
-    general_chat,
-    ingest_knowledge,
-    maintain_knowledge,
-    query_knowledge,
-    propose_or_write_memory,
-    prepare_memory_write,
-    review_knowledge,
-    load_snapshot,
-    load_task,
-    route_intent,
-    summarize_current_page,
+from backend.app.agent.manager.graph_nodes import (
+    build_manager_context_node,
+    execute_agent_tool_node,
+    manager_node,
+    route_manager,
 )
+from backend.app.agent.nodes import finalize, load_snapshot, load_task, propose_or_write_memory
 from backend.app.agent.state import AgentState
 from backend.app.api.events import EventBus
 from backend.app.db.repository import get_task, update_task
@@ -28,71 +19,31 @@ from backend.app.db.repository import get_task, update_task
 logger = logging.getLogger(__name__)
 
 
-def _route_after_intent(state: AgentState) -> str:
-    if state.get("error"):
-        return "finalize"
-    if state.get("intent") == "knowledge_ingest":
-        return "ingest_knowledge"
-    if state.get("intent") == "knowledge_query":
-        return "query_knowledge"
-    if state.get("intent") == "knowledge_maintenance":
-        return "maintain_knowledge"
-    if state.get("intent") == "knowledge_review":
-        return "review_knowledge"
-    if state.get("intent") == "memory_write":
-        return "prepare_memory_write"
-    if state.get("intent") == "web_page_summary":
-        return "summarize_current_page"
-    if state.get("intent") == "web_table_export":
-        return "export_current_page_table"
-    return "general_chat"
-
-
 def build_graph():
     graph = StateGraph(AgentState)
     graph.add_node("load_task", load_task)
     graph.add_node("load_snapshot", load_snapshot)
-    graph.add_node("route_intent", route_intent)
-    graph.add_node("build_context", build_context)
-    graph.add_node("summarize_current_page", summarize_current_page)
-    graph.add_node("export_current_page_table", export_current_page_table)
-    graph.add_node("general_chat", general_chat)
-    graph.add_node("ingest_knowledge", ingest_knowledge)
-    graph.add_node("query_knowledge", query_knowledge)
-    graph.add_node("maintain_knowledge", maintain_knowledge)
-    graph.add_node("review_knowledge", review_knowledge)
-    graph.add_node("prepare_memory_write", prepare_memory_write)
+    graph.add_node("build_manager_context", build_manager_context_node)
+    graph.add_node("manager", manager_node)
+    graph.add_node("execute_agent_tool", execute_agent_tool_node)
     graph.add_node("finalize", finalize)
-    graph.add_node("propose_or_write_memory", propose_or_write_memory)
+    graph.add_node("memory_policy", propose_or_write_memory)
     graph.set_entry_point("load_task")
     graph.add_edge("load_task", "load_snapshot")
-    graph.add_edge("load_snapshot", "route_intent")
-    graph.add_edge("route_intent", "build_context")
+    graph.add_edge("load_snapshot", "build_manager_context")
+    graph.add_edge("build_manager_context", "manager")
     graph.add_conditional_edges(
-        "build_context",
-        _route_after_intent,
+        "manager",
+        route_manager,
         {
+            "manager": "manager",
+            "execute_agent_tool": "execute_agent_tool",
             "finalize": "finalize",
-            "summarize_current_page": "summarize_current_page",
-            "export_current_page_table": "export_current_page_table",
-            "general_chat": "general_chat",
-            "ingest_knowledge": "ingest_knowledge",
-            "query_knowledge": "query_knowledge",
-            "maintain_knowledge": "maintain_knowledge",
-            "review_knowledge": "review_knowledge",
-            "prepare_memory_write": "prepare_memory_write",
         },
     )
-    graph.add_edge("summarize_current_page", "finalize")
-    graph.add_edge("export_current_page_table", "finalize")
-    graph.add_edge("general_chat", "finalize")
-    graph.add_edge("ingest_knowledge", "finalize")
-    graph.add_edge("query_knowledge", "finalize")
-    graph.add_edge("maintain_knowledge", "finalize")
-    graph.add_edge("review_knowledge", "finalize")
-    graph.add_edge("prepare_memory_write", "finalize")
-    graph.add_edge("finalize", "propose_or_write_memory")
-    graph.add_edge("propose_or_write_memory", END)
+    graph.add_edge("execute_agent_tool", "manager")
+    graph.add_edge("finalize", "memory_policy")
+    graph.add_edge("memory_policy", END)
     return graph.compile()
 
 
@@ -114,20 +65,24 @@ async def run_agent(
             else "task.step.completed"
         )
         if name == "load_snapshot":
-            message = "加载任务绑定的上下文快照"
-            event_type = "context.loading"
-        elif name == "build_context":
-            message = "上下文已按任务意图装配"
-            event_type = "context.ready"
+            event_type, user_message = "context.loading", "加载任务绑定的上下文快照"
+        elif name == "build_manager_context":
+            event_type, user_message = "context.ready", "Manager 上下文已装配"
+        elif name == "manager.understand":
+            user_message = "理解完整目标并生成委派计划"
+        elif name == "manager.clarify":
+            user_message = "需要补充任务信息"
+        elif name.startswith("manager.delegate."):
+            user_message = f"委派给 {name.rsplit('.', 1)[-1].title()} Agent"
+        elif name == "manager.synthesize":
+            user_message = "Manager 汇总专业 Agent 结果"
         elif step_type == "tool":
-            message = f"调用工具 {name}"
-        elif name == "intent_router":
-            message = "识别任务意图"
+            user_message = f"调用工具 {name}"
         elif name == "finalize":
-            message = "生成任务结果"
+            user_message = "生成任务结果"
         else:
-            message = "执行步骤完成"
-        await event_bus.publish(event_type, message, task_id=task_id, payload={"step": step})
+            user_message = "执行步骤完成"
+        await event_bus.publish(event_type, user_message, task_id=task_id, payload={"step": step})
 
     await event_bus.publish("task.started", "任务开始执行", task_id=task_id)
     update_task(task_id, status="running")

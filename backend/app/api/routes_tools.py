@@ -17,6 +17,12 @@ def list_tools() -> dict:
                 "risk_level": tool.risk_level,
                 "description": tool.description,
                 "input_schema": tool.input_schema,
+                "output_schema": tool.output_schema,
+                "domain": tool.domain,
+                "preconditions": tool.preconditions,
+                "side_effects": tool.side_effects,
+                "requires_confirmation": tool.requires_confirmation,
+                "allowed_callers": tool.allowed_callers,
             }
             for tool in tool_registry.list()
         ]

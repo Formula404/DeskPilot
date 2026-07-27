@@ -4,7 +4,6 @@ import re
 
 from openai import AsyncOpenAI
 
-from backend.app.agent.intents import detect_intent
 from backend.app.agent.state import AgentState
 from backend.app.agent.tool_calling import (
     ToolCallingError,
@@ -89,35 +88,6 @@ async def _publish_step(state: AgentState, step: dict) -> None:
     publish_step = state.get("publish_step")
     if publish_step:
         await publish_step(step)
-
-
-async def route_intent(state: AgentState) -> AgentState:
-    intent = detect_intent(state["user_input"])
-    step_index = _next_step_index(state)
-    update_task(state["task_id"], intent=intent, status="running")
-    add_task_step(
-        state["task_id"],
-        step_index=step_index,
-        step_type="agent",
-        name="intent_router",
-        status="completed",
-        input_data={"message": state["user_input"]},
-        output_data={"intent": intent},
-    )
-    await _publish_step(
-        state,
-        {
-            "step_index": step_index,
-            "type": "agent",
-            "name": "intent_router",
-            "status": "completed",
-            "input": {"message": state["user_input"]},
-            "output": {"intent": intent},
-        },
-    )
-    next_state = {**state, "intent": intent, "step_count": step_index}
-    save_task_checkpoint(state["task_id"], "route_intent", next_state)
-    return next_state
 
 
 async def build_context(state: AgentState) -> AgentState:
@@ -549,6 +519,19 @@ async def propose_or_write_memory(state: AgentState) -> AgentState:
     content = match.group(1).strip()
     if not content:
         return state
+    if contains_secret(content):
+        step_index = _next_step_index(state)
+        add_task_step(
+            state["task_id"],
+            step_index=step_index,
+            step_type="memory",
+            name="reject_secret_memory",
+            status="completed",
+            output_data={"written": False, "reason": "secret_detected"},
+        )
+        next_state = {**state, "step_count": step_index}
+        save_task_checkpoint(state["task_id"], "reject_secret_memory", next_state)
+        return next_state
     kind = "preference" if any(word in content for word in ("喜欢", "默认", "偏好", "习惯")) else "fact"
     try:
         memory_id = save_memory(

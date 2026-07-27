@@ -85,7 +85,7 @@ domain.action
 - **禁止** 工具直接写长期记忆（由 memory 模块决定）
 - 工具输入输出必须是结构化 schema（Pydantic 或 JSON Schema）
 - 每个工具 handler 必须有超时控制
-- 暴露给 LLM 的工具必须按 intent 做白名单过滤，不能把所有工具一次性暴露。
+- 暴露给 LLM 的工具必须按专业 Agent 做白名单过滤，不能把所有工具一次性暴露。
 - 工具返回给 LLM 的 observation 必须控制大小，网页正文等大文本需要截断或摘要化。
 
 ## 目录组织

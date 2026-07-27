@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import re
 
-from backend.app.context.security import contains_secret
+from backend.app.core.security import contains_secret
 from backend.app.db.connection import connect
 from backend.app.db.repository import new_id, now_iso
 

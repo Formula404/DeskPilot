@@ -63,6 +63,20 @@ export interface ApplicationSettings {
     response_language: "zh-CN" | "en";
     motion_mode: "system" | "reduced" | "full";
   };
+  manager: {
+    enabled: boolean;
+    model: string | null;
+    timeout_seconds: number;
+    max_delegations: number;
+    max_manager_turns: number;
+    structured_output_mode: "auto" | "native" | "json";
+    clarification_confidence_threshold: number;
+  };
+  specialists: Record<"web" | "knowledge" | "file" | "desktop", {
+    model: string | null;
+    timeout_seconds: number;
+    max_tool_steps: number;
+  }>;
 }
 
 export interface ApplicationSettingsUpdate {
@@ -71,6 +85,8 @@ export interface ApplicationSettingsUpdate {
     api_key: string | null;
   };
   general: ApplicationSettings["general"];
+  manager: ApplicationSettings["manager"];
+  specialists: ApplicationSettings["specialists"];
 }
 
 export interface TaskEvent {
