@@ -180,6 +180,7 @@ def register_default_tools() -> None:
     from backend.app.tools.browser.export_structured_blocks_to_xlsx import export_structured_blocks_to_xlsx
     from backend.app.tools.browser.export_table_to_xlsx import export_table_to_xlsx
     from backend.app.tools.browser.summarize import summarize_current_page
+    from backend.app.tools.browser.form_autofill import fill_current_form, remember_current_form
     from backend.app.tools.file.read_text import read_text
     from backend.app.tools.file.write_markdown import write_markdown
     from backend.app.tools.file.write_xlsx import write_xlsx
@@ -202,6 +203,8 @@ def register_default_tools() -> None:
         export_structured_blocks_to_xlsx,
         export_table_to_xlsx,
         summarize_current_page,
+        remember_current_form,
+        fill_current_form,
         read_text,
         write_markdown,
         write_xlsx,

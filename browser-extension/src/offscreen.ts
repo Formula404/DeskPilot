@@ -6,7 +6,7 @@ type BrowserCommand = {
   type: "browser.command";
   request_id: string;
   command: string;
-  target?: { tab?: "active" | number };
+  target?: { tab?: "active" | number; url?: string };
   payload?: Record<string, unknown>;
 };
 

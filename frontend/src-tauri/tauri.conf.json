@@ -27,8 +27,8 @@
       {
         "label": "context-menu",
         "title": "DeskPilot Menu",
-        "width": 188,
-        "height": 216,
+        "width": 224,
+        "height": 230,
         "alwaysOnTop": true,
         "resizable": false,
         "decorations": false,
@@ -73,6 +73,19 @@
         "decorations": false,
         "transparent": false,
         "visible": false
+      },
+      {
+        "label": "personal-info",
+        "title": "DeskPilot 个人信息",
+        "width": 920,
+        "height": 700,
+        "minWidth": 760,
+        "minHeight": 560,
+        "alwaysOnTop": false,
+        "resizable": true,
+        "decorations": false,
+        "transparent": false,
+        "visible": false
       }
     ],
     "security": {
@@ -81,6 +94,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "icon": ["icons/icon.ico"]
   }
 }

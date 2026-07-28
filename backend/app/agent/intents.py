@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from backend.app.agent.form_intent import is_form_fill_request, is_form_memory_request
 from backend.app.agent.manager.models import (
     IntentUnderstanding,
     ManagerPlan,
@@ -96,7 +97,7 @@ def legacy_rule_fallback(
         return None
 
     domain_hits = {
-        "web": any(word in normalized for word in ("网页", "页面", "这篇文章", "眼前这篇", "表格", "website")),
+        "web": any(word in normalized for word in ("网页", "页面", "这篇文章", "眼前这篇", "表格", "表单", "website")),
         "knowledge": "知识库" in normalized or "知识提案" in normalized,
         "file": any(word in normalized for word in ("markdown", "excel", "xlsx", "文件")),
         "desktop": bool(re.search(r"(?:打开|启动)\s*[^，。,.]+", normalized)),
@@ -113,6 +114,28 @@ def legacy_rule_fallback(
             confidence=0.2,
         )
         return ManagerPlan(intent_understanding=understanding, action="clarify", response=question, delegations=[])
+
+    remembers_form = is_form_memory_request(normalized)
+    asks_form = remembers_form or is_form_fill_request(normalized)
+    if asks_form:
+        if not has_browser:
+            question = "提交任务时没有绑定可操作网页，请打开目标表单后重新提交。"
+            return ManagerPlan(
+                intent_understanding=_understanding(domains=["web"], operations=["inspect"], goal=message[:240],
+                                                    clarification=question, confidence=0.96),
+                action="clarify", response=question, delegations=[],
+            )
+        operation = "save" if remembers_form else "update"
+        return ManagerPlan(
+            intent_understanding=_understanding(
+                domains=["web"], operations=["inspect", operation], goal=message[:240],
+                targets=[_target("current_browser_page", snapshot_id, "任务提交时绑定的网页表单")], confidence=0.98,
+            ),
+            action="delegate", response=None,
+            delegations=[PlannedDelegation(id="delegation_1", agent="web", objective=message,
+                                           depends_on=[], input_refs=[snapshot_id] if snapshot_id else [],
+                                           expected_output="表单记忆结果" if operation == "save" else "表单填写结果")],
+        )
 
     if normalized.startswith(("记住", "请记住")):
         response = "好的，我会按你的明确要求记住这项信息。"

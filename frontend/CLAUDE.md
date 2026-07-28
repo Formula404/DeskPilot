@@ -44,7 +44,8 @@ frontend/src/
   types/        # TypeScript 类型定义
   views/        # 按窗口拆分的视图组件（每个视图一个文件）
     FloatingBall.tsx  # 悬浮球
-    ContextMenu.tsx   # 右键菜单
+    AppContextMenu.tsx # 统一右键菜单原语
+    ContextMenu.tsx   # 悬浮球右键菜单
     Overlay.tsx       # 全屏覆盖层（含建议按钮区、状态消息）
     CommandComposer.tsx  # 命令输入框
     TaskPanel.tsx     # 任务执行步骤面板
@@ -77,7 +78,7 @@ Tauri 配置了 4 个独立窗口，每个窗口加载同一前端但根据 `Win
 | 窗口 label        | 视图组件             | 尺寸     | 特点                               |
 | ----------------- | -------------------- | -------- | ---------------------------------- |
 | `floating-ball` | `FloatingBallView` | 132×132 | 无边框、透明、置顶、可拖拽         |
-| `context-menu`  | `ContextMenuView`  | 188×178 | 无边框、透明、置顶、失焦自动隐藏   |
+| `context-menu`  | `ContextMenuView`  | 224×230 | 无边框、透明、置顶、失焦自动隐藏   |
 | `overlay`       | `OverlayView`      | 全屏     | 无边框、透明、置顶、点击空白处关闭 |
 | `settings`      | `SettingsView`     | 860×600 | 无边框、非置顶、可缩放             |
 

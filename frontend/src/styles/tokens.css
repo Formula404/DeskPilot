@@ -17,6 +17,18 @@
   --settings-danger: #dc2626;
   --settings-danger-soft: #fef2f2;
 
+  --form-review-border: rgba(124, 170, 255, 0.28);
+  --form-review-border-soft: rgba(202, 219, 255, 0.16);
+  --form-review-surface: rgba(8, 20, 44, 0.58);
+  --form-review-surface-soft: rgba(255, 255, 255, 0.055);
+  --form-review-surface-focus: rgba(45, 109, 246, 0.13);
+  --form-review-text: rgba(242, 246, 255, 0.92);
+  --form-review-text-soft: rgba(220, 232, 250, 0.68);
+  --form-review-text-muted: rgba(220, 232, 250, 0.48);
+  --form-review-success: rgba(96, 211, 148, 0.95);
+  --form-review-warning: rgba(251, 191, 36, 0.95);
+  --form-review-danger: rgba(248, 113, 113, 0.95);
+
   --glass-border: rgba(202, 219, 255, 0.42);
   --glass-border-muted: rgba(202, 219, 255, 0.36);
   --glass-border-soft: rgba(202, 219, 255, 0.34);
@@ -26,6 +38,17 @@
   --glass-blur-sm: blur(18px);
   --glass-blur-md: blur(24px) saturate(1.5);
   --glass-blur-lg: blur(30px) saturate(1.55);
+
+  --menu-border: rgba(202, 219, 255, 0.24);
+  --menu-surface: rgba(19, 27, 44, 0.96);
+  --menu-surface-hover: rgba(124, 170, 255, 0.13);
+  --menu-text: rgba(235, 242, 253, 0.88);
+  --menu-text-strong: rgba(248, 250, 252, 0.98);
+  --menu-text-muted: rgba(205, 219, 242, 0.5);
+  --menu-divider: rgba(202, 219, 255, 0.14);
+  --menu-danger: rgba(248, 113, 113, 0.94);
+  --menu-danger-surface: rgba(239, 68, 68, 0.12);
+  --menu-shadow: 0 18px 44px rgba(0, 8, 24, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.09);
 
   --radius-pill: 999px;
   --radius-card: 14px;

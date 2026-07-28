@@ -16,6 +16,7 @@ from backend.app.api.routes_knowledge import router as knowledge_router
 from backend.app.api.routes_settings import router as settings_router
 from backend.app.api.routes_sessions import router as sessions_router
 from backend.app.api.routes_memory import router as memory_router
+from backend.app.api.routes_personal_info import router as personal_info_router
 from backend.app.api.routes_tools import router as tools_router
 from backend.app.agent.graph import run_agent
 from backend.app.api.events import event_bus
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_router)
     app.include_router(sessions_router)
     app.include_router(memory_router)
+    app.include_router(personal_info_router)
     app.include_router(tools_router)
     return app
 

@@ -1,7 +1,8 @@
 import { MouseEvent, useEffect, useMemo, useState } from "react";
-import { ExternalLink, File, FileArchive, FileSpreadsheet, FileText, FolderSearch } from "lucide-react";
+import { Clipboard, ExternalLink, File, FileArchive, FileSpreadsheet, FileText, FolderSearch } from "lucide-react";
 import { openArtifactFile, revealArtifactFile } from "../api/client";
 import type { TaskArtifact } from "../types/api";
+import { AppContextMenu, type AppContextMenuGroup } from "./AppContextMenu";
 
 interface ArtifactMenuState {
   artifact: TaskArtifact;
@@ -74,10 +75,19 @@ export function ArtifactLinks({ artifacts, onError }: { artifacts: TaskArtifact[
     }
   }
 
+  async function copyPath(artifact: TaskArtifact) {
+    setMenu(null);
+    try {
+      await navigator.clipboard.writeText(artifact.path);
+    } catch {
+      onError("无法复制文件路径，请检查系统剪贴板权限");
+    }
+  }
+
   function showMenu(event: MouseEvent<HTMLButtonElement>, artifact: TaskArtifact) {
     event.preventDefault();
     const menuWidth = 206;
-    const menuHeight = 78;
+    const menuHeight = 124;
     setMenu({
       artifact,
       x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
@@ -105,15 +115,28 @@ export function ArtifactLinks({ artifacts, onError }: { artifacts: TaskArtifact[
         </button>
       ))}
       {menu ? (
-        <div
+        <AppContextMenu
+          ariaLabel={`${fileName(menu.artifact.path)} 文件操作`}
           className="assistant-artifact-menu"
-          role="menu"
+          groups={[
+            {
+              id: "file",
+              items: [
+                { id: "open", label: "打开文件", icon: <ExternalLink size={15} />, onSelect: () => open(menu.artifact) },
+                { id: "reveal", label: "在文件资源管理器中显示", icon: <FolderSearch size={15} />, onSelect: () => reveal(menu.artifact) }
+              ]
+            },
+            {
+              id: "path",
+              items: [
+                { id: "copy-path", label: "复制文件路径", icon: <Clipboard size={15} />, onSelect: () => copyPath(menu.artifact) }
+              ]
+            }
+          ] satisfies AppContextMenuGroup[]}
           style={{ left: menu.x, top: menu.y }}
           onPointerDown={(event) => event.stopPropagation()}
-        >
-          <button role="menuitem" onClick={() => void open(menu.artifact)}><ExternalLink size={14} />打开文件</button>
-          <button role="menuitem" onClick={() => void reveal(menu.artifact)}><FolderSearch size={14} />在文件资源管理器中显示</button>
-        </div>
+          onEscape={() => setMenu(null)}
+        />
       ) : null}
     </section>
   );

@@ -7,6 +7,7 @@ import { ContextMenuView } from "./views/ContextMenu";
 import { OverlayView } from "./views/Overlay";
 import { SettingsView } from "./views/Settings";
 import { KnowledgeWorkspaceView } from "./views/KnowledgeWorkspace";
+import { PersonalInfoView } from "./views/PersonalInfo";
 
 export function App() {
   const view = useWindowView();
@@ -31,6 +32,10 @@ export function App() {
 
   if (view === "knowledge") {
     return <KnowledgeWorkspaceView />;
+  }
+
+  if (view === "personal-info") {
+    return <PersonalInfoView />;
   }
 
   return <OverlayView />;

@@ -1,19 +1,20 @@
-import { MouseEvent as ReactMouseEvent, useCallback, useRef } from "react";
-import { BookOpen, History, Power, Settings, User } from "lucide-react";
+import { useCallback, useRef } from "react";
+import { BookOpen, LayoutDashboard, Power, Settings, User } from "lucide-react";
 import { gsap, useGSAP } from "../motion/register";
 import { getMotionDuration, motion } from "../motion/constants";
 import { useReducedMotion } from "../motion/useReducedMotion";
 import { useWindowLifecycle } from "../hooks/useWindowLifecycle";
-import { hideCurrentWindow, showWindow } from "./windowActions";
+import { hideCurrentWindow, quitApplication, showOverlayWindow, showWindow } from "./windowActions";
+import { AppContextMenu, type AppContextMenuGroup } from "./AppContextMenu";
 export function ContextMenuView() {
   const rootRef = useRef<HTMLElement | null>(null);
   const afterCloseRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const reduceMotion = useReducedMotion();
 
   const playMenuOpenMotion = useCallback(() => {
-    const menu = rootRef.current?.querySelector("[data-motion='orb-menu']");
-    const items = rootRef.current?.querySelectorAll("[data-motion='orb-menu-item']");
-    const divider = rootRef.current?.querySelector("[data-motion='orb-menu-divider']");
+    const menu = rootRef.current?.querySelector("[data-motion='context-menu']");
+    const items = rootRef.current?.querySelectorAll("[data-motion='context-menu-item']");
+    const divider = rootRef.current?.querySelector("[data-motion='context-menu-divider']");
     if (!menu || !items?.length) {
       return;
     }
@@ -43,9 +44,9 @@ export function ContextMenuView() {
   }, [reduceMotion]);
 
   const resetMenuMotionTargets = useCallback(() => {
-    const menu = rootRef.current?.querySelector("[data-motion='orb-menu']");
-    const items = rootRef.current?.querySelectorAll("[data-motion='orb-menu-item']");
-    const divider = rootRef.current?.querySelector("[data-motion='orb-menu-divider']");
+    const menu = rootRef.current?.querySelector("[data-motion='context-menu']");
+    const items = rootRef.current?.querySelectorAll("[data-motion='context-menu-item']");
+    const divider = rootRef.current?.querySelector("[data-motion='context-menu-divider']");
     const targets = [
       ...(menu ? [menu] : []),
       ...(divider ? [divider] : []),
@@ -60,8 +61,8 @@ export function ContextMenuView() {
   }, { dependencies: [playMenuOpenMotion], scope: rootRef });
 
   const runCloseMotion = useCallback(() => new Promise<void>((resolve) => {
-    const menu = rootRef.current?.querySelector("[data-motion='orb-menu']");
-    const items = rootRef.current?.querySelectorAll("[data-motion='orb-menu-item']");
+    const menu = rootRef.current?.querySelector("[data-motion='context-menu']");
+    const items = rootRef.current?.querySelectorAll("[data-motion='context-menu-item']");
 
     gsap.timeline({
       defaults: { ease: motion.ease.in },
@@ -105,68 +106,48 @@ export function ContextMenuView() {
     await closeMenuWithMotion();
   }
 
-  function animateMenuItem(event: ReactMouseEvent<HTMLButtonElement>, hovered: boolean) {
-    const icon = event.currentTarget.querySelector("svg");
-    const label = event.currentTarget.querySelector("span");
-    gsap.to([icon, label], {
-      x: hovered ? 2 : 0,
-      duration: motion.duration.fast,
-      ease: motion.ease.out
-    });
+  async function openPersonalInfo() {
+    afterCloseRef.current = () => showWindow("personal-info");
+    await closeMenuWithMotion();
   }
+
+  async function openDeskPilot() {
+    afterCloseRef.current = showOverlayWindow;
+    await closeMenuWithMotion();
+  }
+
+  async function exitDeskPilot() {
+    afterCloseRef.current = quitApplication;
+    await closeMenuWithMotion();
+  }
+
+  const menuGroups: AppContextMenuGroup[] = [
+    {
+      id: "primary",
+      items: [
+        { id: "open", label: "打开主面板", icon: <LayoutDashboard size={17} />, onSelect: openDeskPilot },
+        { id: "knowledge", label: "知识库", icon: <BookOpen size={17} />, onSelect: openKnowledge },
+        { id: "personal-info", label: "个人信息", icon: <User size={17} />, onSelect: openPersonalInfo },
+        { id: "settings", label: "设置", icon: <Settings size={17} />, onSelect: openSettings }
+      ]
+    },
+    {
+      id: "application",
+      items: [
+        { id: "quit", label: "退出 DeskPilot", icon: <Power size={17} />, onSelect: exitDeskPilot, tone: "danger" }
+      ]
+    }
+  ];
 
   return (
     <main ref={rootRef} className="context-menu-stage" onContextMenu={(event) => event.preventDefault()}>
-      <nav className="orb-menu" aria-label="悬浮球菜单" data-motion="orb-menu">
-        <button
-          className="orb-menu-item is-active"
-          data-motion="orb-menu-item"
-          onClick={openSettings}
-          onPointerEnter={(event) => animateMenuItem(event, true)}
-          onPointerLeave={(event) => animateMenuItem(event, false)}
-        >
-          <Settings size={17} />
-          <span>设置</span>
-        </button>
-        <button
-          className="orb-menu-item"
-          data-motion="orb-menu-item"
-          onClick={openKnowledge}
-          onPointerEnter={(event) => animateMenuItem(event, true)}
-          onPointerLeave={(event) => animateMenuItem(event, false)}
-        >
-          <BookOpen size={17} />
-          <span>知识库</span>
-        </button>
-        <button
-          className="orb-menu-item"
-          data-motion="orb-menu-item"
-          onPointerEnter={(event) => animateMenuItem(event, true)}
-          onPointerLeave={(event) => animateMenuItem(event, false)}
-        >
-          <User size={17} />
-          <span>个人信息</span>
-        </button>
-        <button
-          className="orb-menu-item"
-          data-motion="orb-menu-item"
-          onPointerEnter={(event) => animateMenuItem(event, true)}
-          onPointerLeave={(event) => animateMenuItem(event, false)}
-        >
-          <History size={17} />
-          <span>任务历史</span>
-        </button>
-        <div className="orb-menu-divider" data-motion="orb-menu-divider" />
-        <button
-          className="orb-menu-item"
-          data-motion="orb-menu-item"
-          onPointerEnter={(event) => animateMenuItem(event, true)}
-          onPointerLeave={(event) => animateMenuItem(event, false)}
-        >
-          <Power size={17} />
-          <span>退出 DeskPilot</span>
-        </button>
-      </nav>
+      <AppContextMenu
+        ariaLabel="DeskPilot 快捷菜单"
+        groups={menuGroups}
+        className="orb-menu"
+        animate={false}
+        onEscape={() => void closeMenuWithMotion("escape")}
+      />
     </main>
   );
 }

@@ -295,3 +295,139 @@ export interface KnowledgeJob {
   error_code: string | null;
   error_message: string | null;
 }
+export interface PersonalInfoField {
+  id: string;
+  category: string;
+  field_key: string;
+  label: string;
+  value: string;
+  aliases: string[];
+  source_type: string;
+  confidence: number;
+  status: "proposed" | "confirmed" | "rejected";
+  updated_at: string;
+}
+
+export interface PersonalInfoOverview {
+  categories: Record<string, string>;
+  record_categories?: string[];
+  items: PersonalInfoField[];
+  records?: PersonalInfoRecord[];
+  form_memories?: FormFillMemory[];
+}
+
+export interface PersonalInfoRecordField {
+  id: string;
+  record_id: string;
+  field_key: string;
+  label: string;
+  value: string;
+  aliases: string[];
+  confidence: number;
+}
+
+export interface PersonalInfoRecord {
+  id: string;
+  category: string;
+  record_type: string;
+  label: string;
+  source_type: string;
+  confidence: number;
+  status: "proposed" | "confirmed" | "rejected";
+  fields: PersonalInfoRecordField[];
+  updated_at: string;
+}
+
+export interface FormFillMemory {
+  id: string;
+  origin: string;
+  path_pattern: string;
+  field_signature: string;
+  field_label: string;
+  section_key: string;
+  field_key: string | null;
+  action: "map" | "literal" | "ignore" | "defer";
+  source_field_id: string | null;
+  source_record_id: string | null;
+  source_field_label: string | null;
+  source_field_value: string | null;
+  source_record_label: string | null;
+  source_record_category: string | null;
+  override_value: string | null;
+  priority: number;
+  use_count: number;
+  updated_at: string;
+}
+
+export interface FormFillCandidate {
+  source_id: string | null;
+  record_id: string | null;
+  record_label: string | null;
+  label: string;
+  value: string;
+  source_type: "field" | "record" | "literal";
+}
+
+export type FormFillFieldStatus = "ready" | "choose" | "confirm" | "existing" | "missing" | "ignore" | "defer" | "filled";
+
+export interface FormFillField {
+  field_id: string;
+  signature: string;
+  field_key: string | null;
+  category: string;
+  structured: boolean;
+  label: string;
+  section_title: string;
+  section_key: string;
+  record_key: string;
+  record_index: number;
+  control_type: string;
+  current_value: string;
+  confidence: number;
+  required: boolean;
+  status: FormFillFieldStatus;
+  reason: string;
+  candidates: FormFillCandidate[];
+  selected: FormFillCandidate | null;
+}
+
+export interface FormFillGroupCandidate {
+  record_id: string;
+  label: string;
+  category: string;
+  source_type: string;
+  fields: Record<string, string>;
+}
+
+export interface FormFillGroup {
+  group_key: string;
+  category: string;
+  status: "ready" | "choose" | "missing";
+  selected_record_id: string | null;
+  remembered: boolean;
+  candidates: FormFillGroupCandidate[];
+}
+
+export interface FormFillSession {
+  session_id: string;
+  target: { url: string; tab: string | number | null; document_id: string | null };
+  title: string;
+  fields: FormFillField[];
+  groups: FormFillGroup[];
+  auto_assignments: Array<Record<string, unknown>>;
+  summary: Record<string, number>;
+  submitted: false;
+}
+
+export interface FormSessionApplyPayload {
+  groups: Record<string, string>;
+  fields: Record<string, {
+    action?: "fill" | "skip" | "ignore" | "defer";
+    value?: string;
+    replace_existing?: boolean;
+    remember?: boolean;
+    save_to_profile?: boolean;
+  }>;
+  remember: boolean;
+  apply_ready: boolean;
+}

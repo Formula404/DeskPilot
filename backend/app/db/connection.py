@@ -190,6 +190,108 @@ def init_db() -> None:
               updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS personal_info_fields (
+              id TEXT PRIMARY KEY,
+              category TEXT NOT NULL,
+              field_key TEXT NOT NULL UNIQUE,
+              label TEXT NOT NULL,
+              value TEXT NOT NULL,
+              aliases_json TEXT NOT NULL DEFAULT '[]',
+              source_type TEXT NOT NULL,
+              source_ref TEXT,
+              confidence REAL NOT NULL DEFAULT 1.0,
+              status TEXT NOT NULL DEFAULT 'confirmed',
+              sensitivity TEXT NOT NULL DEFAULT 'personal',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_personal_info_category_status
+            ON personal_info_fields(category, status, updated_at);
+
+            CREATE TABLE IF NOT EXISTS form_templates (
+              id TEXT PRIMARY KEY,
+              origin TEXT NOT NULL,
+              path_pattern TEXT NOT NULL,
+              title TEXT NOT NULL DEFAULT '',
+              signature TEXT NOT NULL UNIQUE,
+              fields_json TEXT NOT NULL DEFAULT '[]',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS personal_info_records (
+              id TEXT PRIMARY KEY,
+              category TEXT NOT NULL,
+              record_type TEXT NOT NULL,
+              label TEXT NOT NULL,
+              fingerprint TEXT NOT NULL UNIQUE,
+              source_type TEXT NOT NULL,
+              source_ref TEXT,
+              confidence REAL NOT NULL DEFAULT 1.0,
+              status TEXT NOT NULL DEFAULT 'confirmed',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_personal_info_records_category
+            ON personal_info_records(category, updated_at);
+
+            CREATE TABLE IF NOT EXISTS personal_info_record_fields (
+              id TEXT PRIMARY KEY,
+              record_id TEXT NOT NULL,
+              field_key TEXT NOT NULL,
+              label TEXT NOT NULL,
+              value TEXT NOT NULL,
+              aliases_json TEXT NOT NULL DEFAULT '[]',
+              confidence REAL NOT NULL DEFAULT 1.0,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              UNIQUE(record_id, field_key),
+              FOREIGN KEY(record_id) REFERENCES personal_info_records(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS form_fill_memories (
+              id TEXT PRIMARY KEY,
+              origin TEXT NOT NULL,
+              path_pattern TEXT NOT NULL,
+              field_signature TEXT NOT NULL,
+              field_label TEXT NOT NULL DEFAULT '',
+              section_key TEXT NOT NULL DEFAULT '',
+              field_key TEXT,
+              action TEXT NOT NULL DEFAULT 'map',
+              source_field_id TEXT,
+              source_record_id TEXT,
+              override_value TEXT,
+              priority INTEGER NOT NULL DEFAULT 100,
+              use_count INTEGER NOT NULL DEFAULT 0,
+              last_used_at TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              UNIQUE(origin, path_pattern, field_signature)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_form_fill_memories_scope
+            ON form_fill_memories(origin, path_pattern, updated_at);
+
+            CREATE TABLE IF NOT EXISTS form_fill_sessions (
+              id TEXT PRIMARY KEY,
+              origin TEXT NOT NULL,
+              path_pattern TEXT NOT NULL,
+              url TEXT NOT NULL,
+              title TEXT NOT NULL DEFAULT '',
+              tab_id TEXT,
+              document_id TEXT,
+              plan_json TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              expires_at TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_form_fill_sessions_expiry
+            ON form_fill_sessions(status, expires_at);
+
             CREATE TABLE IF NOT EXISTS context_usage (
               id TEXT PRIMARY KEY,
               task_id TEXT NOT NULL,

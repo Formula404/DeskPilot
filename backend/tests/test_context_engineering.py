@@ -299,6 +299,42 @@ async def test_explicit_memory_write_does_not_require_chat_model(context_data_di
     assert row["content"] == "我默认使用中文"
 
 
+@pytest.mark.asyncio
+async def test_profile_proposal_step_is_published(context_data_dir) -> None:
+    task_id = create_task("我的邮箱是 alice@example.com")
+    published = []
+
+    async def publish(step):
+        published.append(step)
+
+    state = await propose_or_write_memory(
+        {
+            "task_id": task_id,
+            "user_input": "我的邮箱是 alice@example.com",
+            "publish_step": publish,
+        }
+    )
+
+    assert state["step_count"] == 1
+    assert published == [{
+        "step_index": 1,
+        "type": "memory",
+        "name": "propose_personal_info",
+        "status": "completed",
+        "output": {"field_ids": published[0]["output"]["field_ids"], "status": "proposed"},
+    }]
+    assert published[0]["output"]["field_ids"]
+
+
+@pytest.mark.asyncio
+async def test_bare_remember_form_does_not_create_generic_memory(context_data_dir) -> None:
+    task_id = create_task("记住表单")
+    await propose_or_write_memory({"task_id": task_id, "user_input": "记住表单"})
+
+    with connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM memory_items").fetchone()[0] == 0
+
+
 def test_deleting_session_removes_bound_task_audit(context_data_dir) -> None:
     session_id = create_session()
     message_id = add_message(session_id, role="user", content="temporary")

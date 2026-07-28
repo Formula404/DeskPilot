@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import deskpilotWhiteIcon from "../assets/deskpilot-white.png";
 import { cancelTask, createContextSnapshot, createSession, createTask, openEventStream } from "../api/client";
-import type { TaskArtifact, TaskEvent } from "../types/api";
+import type { FormFillSession, TaskArtifact, TaskEvent } from "../types/api";
 import type { SuggestedAction, OverlayMode } from "../types/window";
 import { useTaskStore } from "../store/taskStore";
 import { gsap, useGSAP } from "../motion/register";
@@ -29,6 +29,7 @@ import { useWindowLifecycle } from "../hooks/useWindowLifecycle";
 import { CommandComposer } from "./CommandComposer";
 import { ArtifactLinks } from "./ArtifactLinks";
 import { TaskExecutionPanel } from "./TaskPanel";
+import { FormFillReview } from "./FormFillReview";
 import { isVisibleTaskStep } from "./taskStatus";
 import {
   hideCurrentWindow,
@@ -87,6 +88,22 @@ function extractArtifacts(events: TaskEvent[]): TaskArtifact[] {
   return artifacts;
 }
 
+function extractFormFillSession(events: TaskEvent[]): (Partial<FormFillSession> & Pick<FormFillSession, "session_id">) | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const step = events[index].payload?.step;
+    if (!step || typeof step !== "object" || !("output" in step)) continue;
+    const output = (step as { output?: unknown }).output;
+    if (!output || typeof output !== "object") continue;
+    const data = (output as { data?: unknown }).data;
+    if (!data || typeof data !== "object") continue;
+    const session = (data as { form_session?: unknown }).form_session;
+    if (session && typeof session === "object" && "session_id" in session) {
+      return session as Partial<FormFillSession> & Pick<FormFillSession, "session_id">;
+    }
+  }
+  return null;
+}
+
 export function OverlayView() {
   const rootRef = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -114,6 +131,7 @@ export function OverlayView() {
   );
   const finalResponse = useMemo(() => extractFinalResponse(currentTaskEvents), [currentTaskEvents]);
   const artifacts = useMemo(() => extractArtifacts(currentTaskEvents), [currentTaskEvents]);
+  const formFillSession = useMemo(() => extractFormFillSession(currentTaskEvents), [currentTaskEvents]);
   const mode = useMemo<OverlayMode>(() => {
     if (isCreatingTask) return "creating";
     if (currentTaskEvents.some((event) => event.type === "task.failed")) return "failed";
@@ -465,7 +483,7 @@ export function OverlayView() {
                     <p>{statusLabel}</p>
                   </div>
                 </div>
-              ) : finalResponse || artifacts.length ? (
+              ) : finalResponse || artifacts.length || formFillSession ? (
                 <div className="assistant-response">
                   <span className="assistant-avatar"><Sparkles size={16} /></span>
                   <div>
@@ -476,6 +494,7 @@ export function OverlayView() {
                       </Suspense>
                     ) : null}
                     <ArtifactLinks artifacts={artifacts} onError={setActionError} />
+                    {formFillSession ? <FormFillReview initialSession={formFillSession} onError={setActionError} /> : null}
                   </div>
                 </div>
               ) : null}

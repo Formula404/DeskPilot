@@ -35,7 +35,6 @@ export function SettingsView() {
     const logo = rootRef.current?.querySelector("[data-motion='settings-logo']");
     const navItems = rootRef.current?.querySelectorAll("[data-motion='settings-nav-item']");
     const content = rootRef.current?.querySelector("[data-motion='settings-content']");
-    const pageItems = rootRef.current?.querySelectorAll("[data-motion='settings-page-item']");
     if (!stage) {
       return;
     }
@@ -46,7 +45,6 @@ export function SettingsView() {
       ...(logo ? [logo] : []),
       ...(content ? [content] : []),
       ...Array.from(navItems ?? []),
-      ...Array.from(pageItems ?? [])
     ];
     gsap.killTweensOf(targets);
     gsap.set(targets, { x: 0, y: 0, scale: 1, clearProps: "visibility" });
@@ -60,12 +58,7 @@ export function SettingsView() {
         duration: getMotionDuration(0.16, reduceMotion),
         stagger: reduceMotion ? 0 : motion.stagger.tight
       }, 0.04)
-      .fromTo(content ?? [], { autoAlpha: 0 }, { autoAlpha: 1, duration: getMotionDuration(0.16, reduceMotion) }, 0.05)
-      .from(pageItems ?? [], {
-        autoAlpha: 0,
-        duration: getMotionDuration(0.16, reduceMotion),
-        stagger: reduceMotion ? 0 : motion.stagger.normal
-      }, 0.08);
+      .fromTo(content ?? [], { autoAlpha: 0 }, { autoAlpha: 1, duration: getMotionDuration(0.16, reduceMotion) }, 0.05);
   }, [reduceMotion]);
 
   const resetSettingsMotionTargets = useCallback(() => {
@@ -99,11 +92,12 @@ export function SettingsView() {
     if (!pageItems?.length) {
       return;
     }
-    gsap.from(pageItems, {
-      autoAlpha: 0,
+    gsap.fromTo(pageItems, { autoAlpha: 0 }, {
+      autoAlpha: 1,
       duration: getMotionDuration(0.16, reduceMotion),
       stagger: reduceMotion ? 0 : motion.stagger.normal,
-      ease: motion.ease.out
+      ease: motion.ease.out,
+      clearProps: "opacity,visibility"
     });
   }, { dependencies: [displayedActive, reduceMotion], scope: rootRef });
 

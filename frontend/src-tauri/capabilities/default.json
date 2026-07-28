@@ -2,10 +2,11 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "DeskPilot desktop window permissions",
-  "windows": ["floating-ball", "context-menu", "overlay", "settings", "knowledge"],
+  "windows": ["floating-ball", "context-menu", "overlay", "settings", "knowledge", "personal-info"],
   "permissions": [
     "core:default",
     "core:window:allow-current-monitor",
+    "core:window:allow-close",
     "core:window:allow-hide",
     "core:window:allow-outer-position",
     "core:window:allow-scale-factor",

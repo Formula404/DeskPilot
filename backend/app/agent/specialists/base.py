@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from backend.app.agent.form_intent import is_form_fill_request, is_form_memory_request
 from backend.app.agent.specialists.models import SpecialistAgentResult, StrictRequest
 from backend.app.agent.tool_calling import (
     ToolCallingError,
@@ -109,6 +110,10 @@ class SpecialistAgent:
             return bool(proposal_id and proposal_id in text and re.search(r"接受|同意|批准|拒绝|驳回", text))
         if tool_name == "knowledge.rebuild_index":
             return "确认" in text and "重建" in text
+        if tool_name == "browser.remember_current_form":
+            return is_form_memory_request(text)
+        if tool_name == "browser.fill_current_form":
+            return is_form_fill_request(text)
         return False
 
     async def execute_fallback_tool(

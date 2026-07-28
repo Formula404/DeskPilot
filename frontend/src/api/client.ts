@@ -21,7 +21,13 @@ import type {
   SessionResponse,
   ContextSnapshotResponse,
   ContextDataOverview,
-  MemoryOverview
+  MemoryOverview,
+  PersonalInfoField,
+  FormFillMemory,
+  FormFillSession,
+  FormSessionApplyPayload,
+  PersonalInfoOverview,
+  PersonalInfoRecord
 } from "../types/api";
 
 const API_BASE = "http://127.0.0.1:8765";
@@ -95,6 +101,70 @@ export function deleteContextSnapshot(snapshotId: string): Promise<{ ok: boolean
 
 export function deleteMemory(memoryId: string): Promise<{ ok: boolean }> {
   return apiJson(`/memories/${memoryId}`, { method: "DELETE" });
+}
+
+export function getPersonalInfo(): Promise<PersonalInfoOverview> {
+  return apiJson<PersonalInfoOverview>("/personal-info");
+}
+
+export function createPersonalInfo(payload: Pick<PersonalInfoField, "category" | "field_key" | "label" | "value"> & { aliases?: string[] }): Promise<PersonalInfoField> {
+  return apiJson<PersonalInfoField>("/personal-info", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+  });
+}
+
+export function updatePersonalInfo(fieldId: string, payload: Partial<Pick<PersonalInfoField, "category" | "field_key" | "label" | "value" | "aliases" | "status">>): Promise<PersonalInfoField> {
+  return apiJson<PersonalInfoField>(`/personal-info/${fieldId}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+  });
+}
+
+export function deletePersonalInfo(fieldId: string): Promise<{ ok: boolean }> {
+  return apiJson(`/personal-info/${fieldId}`, { method: "DELETE" });
+}
+
+export function updatePersonalInfoRecordField(recordId: string, fieldKey: string, payload: { value: string; label?: string }): Promise<PersonalInfoRecord> {
+  return apiJson<PersonalInfoRecord>(`/personal-info/records/${recordId}/fields/${fieldKey}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+  });
+}
+
+export function deletePersonalInfoRecord(recordId: string): Promise<{ ok: boolean }> {
+  return apiJson(`/personal-info/records/${recordId}`, { method: "DELETE" });
+}
+
+export function createPersonalInfoRecord(payload: { category: string; fields: Array<{ field_key: string; label: string; value: string; aliases?: string[] }> }): Promise<PersonalInfoRecord> {
+  return apiJson<PersonalInfoRecord>("/personal-info/records", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+  });
+}
+
+export function deletePersonalInfoRecordField(recordId: string, fieldKey: string): Promise<{ ok: boolean }> {
+  return apiJson(`/personal-info/records/${recordId}/fields/${fieldKey}`, { method: "DELETE" });
+}
+
+export function updateFormFillMemory(memoryId: string, payload: Partial<Pick<FormFillMemory, "field_key" | "action" | "source_field_id" | "source_record_id" | "override_value" | "priority">>): Promise<FormFillMemory> {
+  return apiJson<FormFillMemory>(`/personal-info/form-memories/${memoryId}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+  });
+}
+
+export function deleteFormFillMemory(memoryId: string): Promise<{ ok: boolean }> {
+  return apiJson(`/personal-info/form-memories/${memoryId}`, { method: "DELETE" });
+}
+
+export function previewCurrentForm(): Promise<FormFillSession> {
+  return apiJson<FormFillSession>("/personal-info/form-sessions/current", { method: "POST" });
+}
+
+export function getFormFillSession(sessionId: string): Promise<FormFillSession> {
+  return apiJson<FormFillSession>(`/personal-info/form-sessions/${sessionId}`);
+}
+
+export function applyFormFillSession(sessionId: string, payload: FormSessionApplyPayload): Promise<{ filled_count: number; filled: string[]; skipped: string[]; submitted: false; form_session: FormFillSession }> {
+  return apiJson(`/personal-info/form-sessions/${sessionId}/apply`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+  });
 }
 
 export async function createTask(

@@ -2,8 +2,8 @@ import { currentMonitor, LogicalPosition, LogicalSize, Window } from "@tauri-app
 import type { WindowView } from "../types/window";
 
 export const FLOATING_CLOSED_SIZE = 132;
-export const CONTEXT_MENU_WIDTH = 188;
-export const CONTEXT_MENU_HEIGHT = 216;
+export const CONTEXT_MENU_WIDTH = 224;
+export const CONTEXT_MENU_HEIGHT = 230;
 export type OverlayShape = "quick" | "conversation" | "hud";
 
 export const OVERLAY_SIZES: Record<OverlayShape, { width: number; height: number }> = {
@@ -23,6 +23,15 @@ export async function showWindow(label: WindowView) {
   const target = await Window.getByLabel(label);
   await target?.show();
   await target?.setFocus();
+}
+
+export async function quitApplication() {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  const labels: WindowView[] = ["overlay", "settings", "knowledge", "personal-info", "floating-ball", "context-menu"];
+  const windows = await Promise.all(labels.map((label) => Window.getByLabel(label)));
+  await Promise.all(windows.map((appWindow) => appWindow?.close()));
 }
 
 export async function hideCurrentWindow() {

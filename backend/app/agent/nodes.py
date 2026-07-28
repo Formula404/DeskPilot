@@ -31,6 +31,7 @@ from backend.app.db.repository import (
 from backend.app.context.budget import estimate_tokens
 from backend.app.db.repository import new_id, now_iso
 from backend.app.memory.repository import save_memory
+from backend.app.personal_info.service import learn_from_chat
 from backend.app.schemas.common import ToolResult
 from backend.app.tools.registry import tool_registry
 
@@ -513,10 +514,35 @@ async def propose_or_write_memory(state: AgentState) -> AgentState:
     if state.get("error"):
         return state
     message = state.get("user_input", "").strip()
+    explicit = bool(re.match(r"(?:请)?记住", message))
+    learned_profile = learn_from_chat(message, source_ref=state.get("task_id"), explicit=explicit)
     match = re.search(r"(?:请)?记住[：:,，\s]*(.+)", message)
     if not match:
+        if learned_profile:
+            step_index = _next_step_index(state)
+            output = {"field_ids": [item["id"] for item in learned_profile], "status": "proposed"}
+            add_task_step(state["task_id"], step_index=step_index, step_type="memory",
+                          name="propose_personal_info", status="completed",
+                          output_data=output)
+            await _publish_step(
+                state,
+                {
+                    "step_index": step_index,
+                    "type": "memory",
+                    "name": "propose_personal_info",
+                    "status": "completed",
+                    "output": output,
+                },
+            )
+            next_state = {**state, "step_count": step_index}
+            save_task_checkpoint(state["task_id"], "propose_personal_info", next_state)
+            return next_state
         return state
     content = match.group(1).strip()
+    if content == "表单" or (
+        "表单" in content and any(word in content for word in ("这个", "当前", "页面", "所填"))
+    ):
+        return state
     if not content:
         return state
     if contains_secret(content):

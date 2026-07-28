@@ -4,7 +4,7 @@ type BrowserCommand = {
   type: "browser.command";
   request_id: string;
   command: string;
-  target?: { tab?: "active" | number };
+  target?: { tab?: "active" | number; url?: string };
   payload?: Record<string, unknown>;
 };
 
@@ -57,15 +57,21 @@ async function wakeBridge() {
 
 async function getTargetTab(command: BrowserCommand): Promise<chrome.tabs.Tab> {
   const targetTab = command.target?.tab;
+  const validate = (tab: chrome.tabs.Tab) => {
+    if (command.target?.url && tab.url !== command.target.url) {
+      throw new Error("任务绑定的网页已跳转或关闭，请重新确认目标后再执行。");
+    }
+    return tab;
+  };
   if (typeof targetTab === "number") {
     const tab = await chrome.tabs.get(targetTab);
     if (!tab.id) throw new Error("目标标签页不可用。");
-    return tab;
+    return validate(tab);
   }
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error("未找到当前活动标签页。");
-  return tab;
+  return validate(tab);
 }
 
 async function sendCollectPageMessage(tabId: number, payload: Record<string, unknown>) {
@@ -131,6 +137,17 @@ async function sendExtractStructuredBlocksMessage(tabId: number, payload: Record
       type: "DESKPILOT_EXTRACT_STRUCTURED_BLOCKS",
       payload,
     });
+  }
+}
+
+async function sendFormMessage(tabId: number, type: "DESKPILOT_INSPECT_FORM" | "DESKPILOT_FILL_FORM", payload: Record<string, unknown>) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, { type, payload });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("Receiving end does not exist")) throw error;
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    return await chrome.tabs.sendMessage(tabId, { type, payload });
   }
 }
 
@@ -211,9 +228,23 @@ async function extractStructuredBlocks(command: BrowserCommand) {
   };
 }
 
+async function inspectForm(command: BrowserCommand) {
+  const tab = await getTargetTab(command);
+  if (!tab.id || !tab.url?.startsWith("http")) throw new Error("当前标签页不是可操作的普通网页。");
+  const form = await sendFormMessage(tab.id, "DESKPILOT_INSPECT_FORM", command.payload ?? {});
+  return { tab_id: tab.id, ...form };
+}
+
+async function fillForm(command: BrowserCommand) {
+  const tab = await getTargetTab(command);
+  if (!tab.id || !tab.url?.startsWith("http")) throw new Error("当前标签页不是可操作的普通网页。");
+  const result = await sendFormMessage(tab.id, "DESKPILOT_FILL_FORM", command.payload ?? {});
+  return { tab_id: tab.id, ...result };
+}
+
 async function handleCommand(command: BrowserCommand): Promise<BrowserResult> {
   try {
-    if (!["collect_metadata", "collect_page", "extract_table", "extract_structured_blocks"].includes(command.command)) {
+    if (!["collect_metadata", "collect_page", "extract_table", "extract_structured_blocks", "inspect_form", "fill_form"].includes(command.command)) {
       return {
         type: "browser.result",
         request_id: command.request_id,
@@ -234,8 +265,12 @@ async function handleCommand(command: BrowserCommand): Promise<BrowserResult> {
       data = await collectPage(command);
     } else if (command.command === "extract_table") {
       data = await extractTable(command);
-    } else {
+    } else if (command.command === "extract_structured_blocks") {
       data = await extractStructuredBlocks(command);
+    } else if (command.command === "inspect_form") {
+      data = await inspectForm(command);
+    } else {
+      data = await fillForm(command);
     }
     return {
       type: "browser.result",
