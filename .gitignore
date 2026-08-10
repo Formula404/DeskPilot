@@ -44,11 +44,7 @@ $RECYCLE.BIN/
 coverage/
 frontend/test-results/
 frontend/playwright-report/
-report/*
-!report/上下文工程设计.md
-!report/大模型语义意图识别完整设计.md
-!report/大模型语义意图识别模块开发交付说明.md
-!report/智能表单自动填写功能交付报告.md
+/report/
 
 # Python type checking
 .mypy_cache/
